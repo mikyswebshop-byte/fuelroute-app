@@ -11,11 +11,8 @@ interface Truck {
   tank_capacity?: number;
   tank_capacity_liters?: number;
   avg_consumption?: number;
-  avg_consumption_l_100km?: number;
   mileage?: number;
   year?: number;
-  fuel_type?: string;
-  status?: string;
 }
 
 export default function TrucksPage() {
@@ -61,11 +58,9 @@ export default function TrucksPage() {
     const newTruck: any = {
       license_plate: licensePlate.toUpperCase().trim(),
       model: vehicleName,
-      name: vehicleName,
       tank_capacity: capacity,
       tank_capacity_liters: capacity,
       avg_consumption: consumption,
-      avg_consumption_l_100km: consumption,
     };
 
     if (mileage) newTruck.mileage = Number(mileage);
@@ -111,7 +106,6 @@ export default function TrucksPage() {
         const text = evt.target?.result as string;
         if (!text) return;
 
-        // Schoon UTF-8 tekens op
         const cleanedText = text.replace(/^\uFEFF/, '');
         const lines = cleanedText
           .split(/\r?\n/)
@@ -123,7 +117,6 @@ export default function TrucksPage() {
           return;
         }
 
-        // Automatische herkenning van scheidingsteken (; of , of tab)
         const firstLine = lines[0];
         let delimiter = ',';
         if (firstLine.includes(';')) delimiter = ';';
@@ -144,7 +137,6 @@ export default function TrucksPage() {
             rowData[header] = values[idx] || '';
           });
 
-          // Flexibele ondersteuning voor Nederlandse en Engelse kolomkoppen
           const licensePlateVal =
             rowData['license_plate'] ||
             rowData['kenteken'] ||
@@ -170,8 +162,8 @@ export default function TrucksPage() {
               : 600;
 
             const rawCons =
-              rowData['avg_consumption_l_100km'] ||
               rowData['avg_consumption'] ||
+              rowData['avg_consumption_l_100km'] ||
               rowData['verbruik'];
             const consumption = rawCons && !isNaN(Number(rawCons.replace(',', '.')))
               ? Number(rawCons.replace(',', '.'))
@@ -188,11 +180,9 @@ export default function TrucksPage() {
             const item: any = {
               license_plate: licensePlateVal.toUpperCase().trim(),
               model: vehicleName,
-              name: vehicleName,
               tank_capacity: capacity,
               tank_capacity_liters: capacity,
               avg_consumption: consumption,
-              avg_consumption_l_100km: consumption,
             };
 
             if (mileageVal !== undefined) item.mileage = mileageVal;
@@ -350,7 +340,7 @@ export default function TrucksPage() {
           <div className="grid gap-4 md:grid-cols-2">
             {trucks.map((truck) => {
               const capacity = truck.tank_capacity_liters || truck.tank_capacity || 600;
-              const consumption = truck.avg_consumption_l_100km || truck.avg_consumption || 28.5;
+              const consumption = truck.avg_consumption || 28.5;
               const vehicleName = truck.model || truck.name || 'Vrachtwagen';
 
               return (

@@ -1,63 +1,56 @@
-export const dynamic = 'force-dynamic';
-
-import { supabase } from '@/lib/supabase';
-
-interface Station {
-  id: string;
-  name: string;
-  brand: string;
-  address: string;
-  price_euro95: number;
-  price_diesel: number;
-}
-
-export default async function Home() {
-  const { data: stations, error } = await supabase.from('fuel_stations').select('*');
-
+export default function DashboardPage() {
   return (
-    <main className="min-h-screen bg-slate-900 text-white p-8">
-      <div className="max-w-4xl mx-auto space-y-6">
-        <div>
-          <h1 className="text-3xl font-bold text-blue-400">FuelRoute Dashboard</h1>
-          <p className="text-slate-400 text-sm mt-1">Actueel overzicht van aangesloten tankstations en prijzen</p>
-        </div>
-
-        {error ? (
-          <div className="p-4 bg-red-900/50 border border-red-700 text-red-200 rounded-lg">
-            Fout bij het ophalen van gegevens: {error.message}
-          </div>
-        ) : !stations || stations.length === 0 ? (
-          <div className="p-6 bg-slate-800 rounded-xl border border-slate-700 text-center">
-            <p className="text-slate-300">Nog geen tankstations gevonden.</p>
-          </div>
-        ) : (
-          <div className="grid gap-4 md:grid-cols-2">
-            {stations.map((station: Station) => (
-              <div key={station.id} className="p-5 bg-slate-800 rounded-xl border border-slate-700 space-y-3">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h2 className="text-xl font-bold text-white">{station.name}</h2>
-                    <p className="text-xs text-slate-400">{station.address}</p>
-                  </div>
-                  <span className="px-2 py-1 bg-slate-700 text-slate-300 rounded text-xs font-mono">
-                    {station.brand}
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-xs border-t border-slate-700 pt-3">
-                  <div>
-                    <span className="block text-slate-500">Euro 95</span>
-                    <span className="text-green-400 font-bold text-sm">€ {station.price_euro95}</span>
-                  </div>
-                  <div>
-                    <span className="block text-slate-500">Diesel</span>
-                    <span className="text-blue-400 font-bold text-sm">€ {station.price_diesel}</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+    <div className="p-8 max-w-6xl mx-auto space-y-8">
+      <div>
+        <h1 className="text-3xl font-extrabold text-white">Overzicht</h1>
+        <p className="text-slate-400 mt-1">Welkom terug. Hier is de actuele status van je vloot.</p>
       </div>
-    </main>
+
+      {/* KPI Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="bg-slate-800 p-6 rounded-2xl border border-slate-700 shadow-lg">
+          <h3 className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-2">Actieve Routes</h3>
+          <span className="text-4xl font-black text-emerald-400">14</span>
+        </div>
+        <div className="bg-slate-800 p-6 rounded-2xl border border-slate-700 shadow-lg">
+          <h3 className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-2">Brandstof Bespaard (Mnd)</h3>
+          <span className="text-4xl font-black text-blue-400">1,240 L</span>
+        </div>
+        <div className="bg-slate-800 p-6 rounded-2xl border border-slate-700 shadow-lg">
+          <h3 className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-2">Alerts & Meldingen</h3>
+          <span className="text-4xl font-black text-amber-400">2</span>
+        </div>
+      </div>
+
+      {/* Recente Activiteit */}
+      <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-lg overflow-hidden">
+        <div className="p-6 border-b border-slate-700">
+          <h2 className="text-lg font-bold text-white">Recente Dispatches</h2>
+        </div>
+        <div className="p-0">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-slate-900/50 text-slate-400">
+              <tr>
+                <th className="p-4 font-semibold">Voertuig</th>
+                <th className="p-4 font-semibold">Traject</th>
+                <th className="p-4 font-semibold">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-700/50">
+              <tr>
+                <td className="p-4 text-white">DAF XF 480 (45-BJK-8)</td>
+                <td className="p-4 text-slate-300">Rotterdam ➔ München</td>
+                <td className="p-4"><span className="px-2 py-1 bg-emerald-500/20 text-emerald-400 rounded-md text-xs font-bold">Onderweg</span></td>
+              </tr>
+              <tr>
+                <td className="p-4 text-white">Volvo FH 500 (12-34-AB)</td>
+                <td className="p-4 text-slate-300">Antwerpen ➔ Parijs</td>
+                <td className="p-4"><span className="px-2 py-1 bg-blue-500/20 text-blue-400 rounded-md text-xs font-bold">Gepland</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   );
 }

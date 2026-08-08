@@ -1,51 +1,43 @@
-import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
-import Link from 'next/link';
 import './globals.css';
+import Link from 'next/link';
 
-const inter = Inter({ subsets: ['latin'] });
-
-export const metadata: Metadata = {
-  title: 'FuelRoute',
-  description: 'Slimme routeplanner voor brandstofbesparing',
+export const metadata = {
+  title: 'FuelRoute | Fleet Management',
+  description: 'Smart Route Planning & Dispatch',
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="nl">
-      <body className={`${inter.className} bg-slate-900 text-white min-h-screen flex flex-col`}>
-        <header className="border-b border-slate-800 bg-slate-950/50 backdrop-blur sticky top-0 z-50">
-          <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-            <Link href="/" className="flex items-center gap-2">
-              <span className="text-xl font-black bg-gradient-to-r from-blue-400 to-indigo-500 bg-clip-text text-transparent">
-                FuelRoute
-              </span>
-              <span className="text-xs bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded border border-blue-500/20">
-                v1.0
-              </span>
-            </Link>
-
-            <nav className="flex gap-6 text-sm font-medium">
-              <Link href="/" className="hover:text-blue-400 transition-colors">
-                Tankstations
-              </Link>
-              <Link href="/planner" className="hover:text-blue-400 transition-colors">
-                Routeplanner
-              </Link>
-              <Link href="/trucks" className="hover:text-blue-400 transition-colors">
-                Voertuigen
-              </Link>
-            </nav>
+      <body className="bg-slate-900 text-slate-200 min-h-screen flex">
+        {/* Zijbalk Navigatie (Wordt verborgen bij printen) */}
+        <aside className="w-64 bg-slate-950 border-r border-slate-800 hidden md:flex flex-col print:hidden">
+          <div className="p-6 border-b border-slate-800">
+            <h1 className="text-2xl font-black text-blue-500 tracking-tight">FUELROUTE<span className="text-slate-100">.</span></h1>
           </div>
-        </header>
+          <nav className="flex-1 p-4 space-y-2">
+            <Link href="/" className="block px-4 py-3 rounded-xl hover:bg-slate-800 transition font-medium text-sm">
+              📊 Dashboard
+            </Link>
+            <Link href="/planner" className="block px-4 py-3 bg-blue-600/10 text-blue-400 rounded-xl hover:bg-blue-600/20 transition font-bold text-sm">
+              🗺️ Routeplanner
+            </Link>
+            <Link href="/fleet" className="block px-4 py-3 rounded-xl hover:bg-slate-800 transition font-medium text-sm">
+              🚛 Vlootbeheer
+            </Link>
+            <Link href="/settings" className="block px-4 py-3 rounded-xl hover:bg-slate-800 transition font-medium text-sm">
+              ⚙️ Instellingen
+            </Link>
+          </nav>
+          <div className="p-4 border-t border-slate-800 text-xs text-slate-500">
+            © 2026 FuelRoute V1.0
+          </div>
+        </aside>
 
-        <div className="flex-1 max-w-6xl w-full mx-auto p-4 md:p-6">
+        {/* Hoofdcontent */}
+        <main className="flex-1 max-h-screen overflow-y-auto print:max-h-none print:overflow-visible">
           {children}
-        </div>
+        </main>
       </body>
     </html>
   );

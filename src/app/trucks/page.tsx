@@ -23,7 +23,7 @@ export default function TrucksPage() {
   const [submitting, setSubmitting] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // Alle formuliervelden
+  // Formulier velden
   const [model, setModel] = useState('');
   const [licensePlate, setLicensePlate] = useState('');
   const [tankCapacity, setTankCapacity] = useState('600');
@@ -31,7 +31,6 @@ export default function TrucksPage() {
   const [mileage, setMileage] = useState('');
   const [year, setYear] = useState('');
 
-  // 1. Ophalen van voertuigen uit Supabase
   const fetchTrucks = async () => {
     setLoading(true);
     const { data, error } = await supabase
@@ -49,7 +48,6 @@ export default function TrucksPage() {
     fetchTrucks();
   }, []);
 
-  // 2. Handmatig voertuig toevoegen
   const handleAddTruck = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
@@ -66,17 +64,7 @@ export default function TrucksPage() {
     if (mileage) newTruck.mileage = Number(mileage);
     if (year) newTruck.year = Number(year);
 
-    let { error } = await supabase.from('trucks').insert([newTruck]);
-
-    // Fallback voor als optionele kolommen nog niet bestaan in Supabase schema
-    if (error && error.message.includes('schema cache')) {
-      console.warn('Sommige kolommen bestaan nog niet in Supabase. Fallback naar basisvelden.');
-      const fallbackTruck = {
-        license_plate: licensePlate.toUpperCase(),
-      };
-      const res = await supabase.from('trucks').insert([fallbackTruck]);
-      error = res.error;
-    }
+    const { error } = await supabase.from('trucks').insert([newTruck]);
 
     if (error) {
       alert('Fout bij toevoegen: ' + error.message);
@@ -91,7 +79,6 @@ export default function TrucksPage() {
     setSubmitting(false);
   };
 
-  // 3. Voertuig verwijderen
   const handleDeleteTruck = async (id: string, licensePlate: string) => {
     const confirmDelete = window.confirm(`Weet je zeker dat je voertuig ${licensePlate} wilt verwijderen?`);
     if (!confirmDelete) return;
@@ -107,7 +94,6 @@ export default function TrucksPage() {
     setDeletingId(null);
   };
 
-  // 4. Bulk CSV-upload
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -152,14 +138,7 @@ export default function TrucksPage() {
 
       if (rowsToInsert.length > 0) {
         setSubmitting(true);
-        let { error } = await supabase.from('trucks').insert(rowsToInsert);
-
-        // Fallback als Supabase-tabel nog niet alle kolommen heeft
-        if (error && error.message.includes('schema cache')) {
-          const minimalRows = rowsToInsert.map((r) => ({ license_plate: r.license_plate }));
-          const res = await supabase.from('trucks').insert(minimalRows);
-          error = res.error;
-        }
+        const { error } = await supabase.from('trucks').insert(rowsToInsert);
 
         if (error) {
           alert('Fout bij importeren CSV: ' + error.message);
@@ -183,16 +162,14 @@ export default function TrucksPage() {
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
             <h1 className="text-3xl font-bold text-blue-400">Vlootbeheer - Voertuigen</h1>
-            <p className="text-slate-400 text-sm mt-1">Overzicht, bulkbeheer en bewerken van vrachtwagens</p>
+            <p className="text-slate-400 text-sm mt-1">Overzicht en bulkbeheer van vrachtwagens</p>
           </div>
           <div className="flex items-center gap-3">
-            {/* CSV Import Button */}
             <label className="cursor-pointer px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold rounded-lg transition text-sm flex items-center gap-2">
               📁 Importeer CSV
               <input type="file" accept=".csv" onChange={handleFileUpload} className="hidden" />
             </label>
 
-            {/* Handmatig Toevoegen Knop */}
             <button
               onClick={() => setShowForm(!showForm)}
               className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg transition text-sm"
@@ -299,34 +276,15 @@ export default function TrucksPage() {
         ) : (
           <div className="grid gap-4 md:grid-cols-2">
             {trucks.map((truck) => (
-              <div key={truck.id} className="p-5 bg-slate-800 rounded-xl border border-slate-700 space-y-3 relative group">
+              <div key={truck.id} className="p-5 bg-slate-800 rounded-xl border border-slate-700 space-y-3">
                 <div className="flex justify-between items-start">
                   <div>
                     <h2 className="text-xl font-bold text-white">{truck.model || truck.name || 'Vrachtwagen'}</h2>
                     {truck.year && <span className="text-xs text-slate-400">Bouwjaar: {truck.year}</span>}
                   </div>
-                  
-                  <div className="flex items-center gap-2">
-                    <span className="px-2.5 py-1 bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 rounded font-mono text-xs font-semibold">
-                      {truck.license_plate}
-                    </span>
-
-                    {/* Verwijderknop */}
-                    <button
-                      onClick={() => handleDeleteTruck(truck.id, truck.license_plate)}
-                      disabled={deletingId === truck.id}
-                      title="Voertuig verwijderen"
-                      className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded transition"
-                    >
-                      {deletingId === truck.id ? (
-                        <span className="text-xs">...</span>
-                      ) : (
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      )}
-                    </button>
-                  </div>
+                  <span className="px-2.5 py-1 bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 rounded font-mono text-xs font-semibold">
+                    {truck.license_plate}
+                  </span>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 text-xs text-slate-300 border-t border-slate-700 pt-3">
@@ -344,6 +302,17 @@ export default function TrucksPage() {
                       <span className="font-semibold">{Number(truck.mileage).toLocaleString('nl-NL')} km</span>
                     </div>
                   )}
+                </div>
+
+                {/* Duidelijke Verwijderknop onderaan elk kaartje */}
+                <div className="border-t border-slate-700/60 pt-3 flex justify-end">
+                  <button
+                    onClick={() => handleDeleteTruck(truck.id, truck.license_plate)}
+                    disabled={deletingId === truck.id}
+                    className="px-3 py-1.5 bg-red-600/20 hover:bg-red-600 text-red-300 hover:text-white border border-red-500/30 rounded text-xs font-semibold transition flex items-center gap-1.5 disabled:opacity-50"
+                  >
+                    🗑️ {deletingId === truck.id ? 'Verwijderen...' : 'Verwijder Voertuig'}
+                  </button>
                 </div>
               </div>
             ))}

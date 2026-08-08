@@ -59,7 +59,7 @@ export default function TrucksPage() {
     const consumption = Number(avgConsumption) || 28.5;
 
     const newTruck: any = {
-      license_plate: licensePlate.toUpperCase(),
+      license_plate: licensePlate.toUpperCase().trim(),
       model: vehicleName,
       name: vehicleName,
       tank_capacity: capacity,
@@ -107,68 +107,123 @@ export default function TrucksPage() {
 
     const reader = new FileReader();
     reader.onload = async (evt) => {
-      const text = evt.target?.result as string;
-      if (!text) return;
+      try {
+        const text = evt.target?.result as string;
+        if (!text) return;
 
-      const lines = text.split('\n').map((line) => line.trim()).filter((line) => line.length > 0);
-      if (lines.length < 2) {
-        alert('CSV-bestand is leeg of bevat geen data-rijen.');
-        return;
-      }
+        // Schoon UTF-8 tekens op
+        const cleanedText = text.replace(/^\uFEFF/, '');
+        const lines = cleanedText
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter((line) => line.length > 0);
 
-      const headers = lines[0].split(',').map((h) => h.trim().toLowerCase());
-      const rowsToInsert: any[] = [];
-
-      for (let i = 1; i < lines.length; i++) {
-        const values = lines[i].split(',').map((v) => v.trim());
-        if (values.length < headers.length) continue;
-
-        const row: any = {};
-        headers.forEach((header, index) => {
-          row[header] = values[index];
-        });
-
-        if (row.license_plate) {
-          const rawCapacity = row.tank_capacity_liters || row.tank_capacity;
-          const capacity = (rawCapacity && !isNaN(Number(rawCapacity))) ? Number(rawCapacity) : 600;
-          
-          const rawConsumption = row.avg_consumption_l_100km || row.avg_consumption;
-          const consumption = (rawConsumption && !isNaN(Number(rawConsumption))) ? Number(rawConsumption) : 28.5;
-          
-          const vehicleName = row.name || row.model || 'Vrachtwagen';
-
-          const item: any = {
-            license_plate: row.license_plate.toUpperCase(),
-            model: vehicleName,
-            name: vehicleName,
-            tank_capacity: capacity,
-            tank_capacity_liters: capacity,
-            avg_consumption: consumption,
-            avg_consumption_l_100km: consumption,
-          };
-
-          if (row.mileage && !isNaN(Number(row.mileage))) item.mileage = Number(row.mileage);
-          if (row.year && !isNaN(Number(row.year))) item.year = Number(row.year);
-
-          rowsToInsert.push(item);
+        if (lines.length < 2) {
+          alert('Het CSV-bestand is leeg of bevat geen gegevens.');
+          return;
         }
-      }
 
-      if (rowsToInsert.length > 0) {
+        // Automatische herkenning van scheidingsteken (; of , of tab)
+        const firstLine = lines[0];
+        let delimiter = ',';
+        if (firstLine.includes(';')) delimiter = ';';
+        else if (firstLine.includes('\t')) delimiter = '\t';
+
+        const parseLine = (line: string) =>
+          line.split(delimiter).map((v) => v.trim().replace(/^["']|["']$/g, ''));
+
+        const rawHeaders = parseLine(lines[0]).map((h) => h.toLowerCase());
+        const rowsToInsert: any[] = [];
+
+        for (let i = 1; i < lines.length; i++) {
+          const values = parseLine(lines[i]);
+          if (values.length === 0 || (values.length === 1 && !values[0])) continue;
+
+          const rowData: Record<string, string> = {};
+          rawHeaders.forEach((header, idx) => {
+            rowData[header] = values[idx] || '';
+          });
+
+          // Flexibele ondersteuning voor Nederlandse en Engelse kolomkoppen
+          const licensePlateVal =
+            rowData['license_plate'] ||
+            rowData['kenteken'] ||
+            rowData['license'] ||
+            rowData['plate'] ||
+            values[0];
+
+          if (licensePlateVal && licensePlateVal.length >= 4) {
+            const vehicleName =
+              rowData['model'] ||
+              rowData['merk'] ||
+              rowData['name'] ||
+              rowData['naam'] ||
+              'Vrachtwagen';
+
+            const rawCap =
+              rowData['tank_capacity_liters'] ||
+              rowData['tank_capacity'] ||
+              rowData['tankinhoud'] ||
+              rowData['tank'];
+            const capacity = rawCap && !isNaN(Number(rawCap.replace(',', '.')))
+              ? Number(rawCap.replace(',', '.'))
+              : 600;
+
+            const rawCons =
+              rowData['avg_consumption_l_100km'] ||
+              rowData['avg_consumption'] ||
+              rowData['verbruik'];
+            const consumption = rawCons && !isNaN(Number(rawCons.replace(',', '.')))
+              ? Number(rawCons.replace(',', '.'))
+              : 28.5;
+
+            const rawKm = rowData['mileage'] || rowData['km'] || rowData['kilometerstand'];
+            const mileageVal = rawKm && !isNaN(Number(rawKm.replace(',', '.')))
+              ? Number(rawKm.replace(',', '.'))
+              : undefined;
+
+            const rawYear = rowData['year'] || rowData['bouwjaar'];
+            const yearVal = rawYear && !isNaN(Number(rawYear)) ? Number(rawYear) : undefined;
+
+            const item: any = {
+              license_plate: licensePlateVal.toUpperCase().trim(),
+              model: vehicleName,
+              name: vehicleName,
+              tank_capacity: capacity,
+              tank_capacity_liters: capacity,
+              avg_consumption: consumption,
+              avg_consumption_l_100km: consumption,
+            };
+
+            if (mileageVal !== undefined) item.mileage = mileageVal;
+            if (yearVal !== undefined) item.year = yearVal;
+
+            rowsToInsert.push(item);
+          }
+        }
+
+        if (rowsToInsert.length === 0) {
+          alert('Geen geldige kentekens gevonden in het CSV-bestand.');
+          return;
+        }
+
         setSubmitting(true);
         const { error } = await supabase.from('trucks').insert(rowsToInsert);
 
         if (error) {
-          alert('Fout bij importeren CSV: ' + error.message);
+          alert('Fout bij opslaan in database: ' + error.message);
         } else {
-          alert(`${rowsToInsert.length} voertuigen succesvol geïmporteerd!`);
+          alert(`Gelukt! ${rowsToInsert.length} voertuig(en) succesvol geïmporteerd!`);
           await fetchTrucks();
         }
+      } catch (err: any) {
+        alert('Fout bij verwerken bestand: ' + (err?.message || 'Onbekende fout'));
+      } finally {
         setSubmitting(false);
-      } else {
-        alert('Geen geldige kentekens gevonden in het CSV-bestand.');
+        e.target.value = '';
       }
     };
+
     reader.readAsText(file);
   };
 
@@ -284,7 +339,7 @@ export default function TrucksPage() {
           </form>
         )}
 
-        {/* Lijst van voertuigen */}
+        {/* Voertuigen Lijst */}
         {loading ? (
           <p className="text-slate-400">Voertuigen laden uit database...</p>
         ) : trucks.length === 0 ? (

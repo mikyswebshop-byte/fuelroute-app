@@ -7,6 +7,7 @@ interface Truck {
   id: string;
   license_plate: string;
   name?: string;
+  model?: string;
   tank_capacity?: number;
   avg_consumption?: number;
   mileage?: number;
@@ -28,7 +29,6 @@ export default function TrucksPage() {
   const [avgConsumption, setAvgConsumption] = useState('28.5');
   const [mileage, setMileage] = useState('');
   const [year, setYear] = useState('');
-  const [fuelType, setFuelType] = useState('Diesel');
 
   const fetchTrucks = async () => {
     setLoading(true);
@@ -43,21 +43,21 @@ export default function TrucksPage() {
     fetchTrucks();
   }, []);
 
-  // Enkel voertuig toevoegen
+  // Enkel voertuig toevoegen (past zich aan op jouw Supabase kolommen)
   const handleAddTruck = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
 
-    const newTruck = {
-      name: name || 'Vrachtwagen',
+    const vehicleName = name || 'Vrachtwagen';
+    const newTruck: any = {
       license_plate: licensePlate.toUpperCase(),
       tank_capacity: Number(tankCapacity) || 600,
       avg_consumption: Number(avgConsumption) || 28.5,
-      mileage: mileage ? Number(mileage) : null,
-      year: year ? Number(year) : null,
-      fuel_type: fuelType,
-      status: 'Actief',
+      model: vehicleName,
     };
+
+    if (mileage) newTruck.mileage = Number(mileage);
+    if (year) newTruck.year = Number(year);
 
     const { error } = await supabase.from('trucks').insert([newTruck]);
 
@@ -103,16 +103,20 @@ export default function TrucksPage() {
         });
 
         if (row.license_plate) {
-          newTrucks.push({
+          const vehicleName = row.name || row.model || 'Vrachtwagen';
+          
+          // Bouw het object veilig op met gegarandeerde Supabase velden
+          const truckObj: any = {
             license_plate: row.license_plate.toUpperCase(),
-            name: row.name || 'Vrachtwagen',
+            model: vehicleName,
             tank_capacity: Number(row.tank_capacity) || 600,
             avg_consumption: Number(row.avg_consumption) || 28.5,
-            mileage: row.mileage ? Number(row.mileage) : null,
-            year: row.year ? Number(row.year) : null,
-            fuel_type: row.fuel_type || 'Diesel',
-            status: row.status || 'Actief',
-          });
+          };
+
+          if (row.mileage && !isNaN(Number(row.mileage))) truckObj.mileage = Number(row.mileage);
+          if (row.year && !isNaN(Number(row.year))) truckObj.year = Number(row.year);
+
+          newTrucks.push(truckObj);
         }
       }
 
@@ -261,7 +265,7 @@ export default function TrucksPage() {
               <div key={truck.id} className="p-5 bg-slate-800 rounded-xl border border-slate-700 space-y-3">
                 <div className="flex justify-between items-start">
                   <div>
-                    <h2 className="text-xl font-bold text-white">{truck.name || 'Vrachtwagen'}</h2>
+                    <h2 className="text-xl font-bold text-white">{truck.model || truck.name || 'Vrachtwagen'}</h2>
                     {truck.year && <span className="text-xs text-slate-400">Bouwjaar: {truck.year}</span>}
                   </div>
                   <span className="px-2.5 py-1 bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 rounded font-mono text-xs font-semibold">
@@ -282,12 +286,6 @@ export default function TrucksPage() {
                     <div>
                       <span className="block text-slate-500">KM-Stand</span>
                       <span className="font-semibold">{truck.mileage.toLocaleString('nl-NL')} km</span>
-                    </div>
-                  )}
-                  {truck.status && (
-                    <div>
-                      <span className="block text-slate-500">Status</span>
-                      <span className="font-semibold text-green-400">{truck.status}</span>
                     </div>
                   )}
                 </div>

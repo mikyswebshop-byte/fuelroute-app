@@ -9,7 +9,9 @@ interface Truck {
   model?: string;
   name?: string;
   tank_capacity?: number;
+  tank_capacity_liters?: number;
   avg_consumption?: number;
+  avg_consumption_l_100km?: number;
   mileage?: number;
   year?: number;
   fuel_type?: string;
@@ -53,12 +55,18 @@ export default function TrucksPage() {
     setSubmitting(true);
 
     const vehicleName = model || 'Vrachtwagen';
+    const capacity = Number(tankCapacity) || 600;
+    const consumption = Number(avgConsumption) || 28.5;
     
+    // We vullen zowel de oude als nieuwe kolomnamen in zodat Supabase nooit klaagt
     const newTruck: any = {
       license_plate: licensePlate.toUpperCase(),
       model: vehicleName,
-      tank_capacity: Number(tankCapacity) || 600,
-      avg_consumption: Number(avgConsumption) || 28.5,
+      name: vehicleName,
+      tank_capacity: capacity,
+      tank_capacity_liters: capacity,
+      avg_consumption: consumption,
+      avg_consumption_l_100km: consumption,
     };
 
     if (mileage) newTruck.mileage = Number(mileage);
@@ -122,11 +130,18 @@ export default function TrucksPage() {
         });
 
         if (row.license_plate) {
+          const capacity = Number(row.tank_capacity_liters || row.tank_capacity) || 600;
+          const consumption = Number(row.avg_consumption_l_100km || row.avg_consumption) || 28.5;
+          const vehicleName = row.name || row.model || 'Vrachtwagen';
+
           const item: any = {
             license_plate: row.license_plate.toUpperCase(),
-            model: row.name || row.model || 'Vrachtwagen',
-            tank_capacity: Number(row.tank_capacity) || 600,
-            avg_consumption: Number(row.avg_consumption) || 28.5,
+            model: vehicleName,
+            name: vehicleName,
+            tank_capacity: capacity,
+            tank_capacity_liters: capacity,
+            avg_consumption: consumption,
+            avg_consumption_l_100km: consumption,
           };
 
           if (row.mileage && !isNaN(Number(row.mileage))) item.mileage = Number(row.mileage);
@@ -162,7 +177,7 @@ export default function TrucksPage() {
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
             <h1 className="text-3xl font-bold text-blue-400">Vlootbeheer - Voertuigen</h1>
-            <p className="text-slate-400 text-sm mt-1">Overzicht en bulkbeheer van vrachtwagens</p>
+            <p className="text-slate-400 text-sm mt-1">Overzicht, bulkbeheer en bewerken van vrachtwagens</p>
           </div>
           <div className="flex items-center gap-3">
             <label className="cursor-pointer px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold rounded-lg transition text-sm flex items-center gap-2">
@@ -275,47 +290,52 @@ export default function TrucksPage() {
           </div>
         ) : (
           <div className="grid gap-4 md:grid-cols-2">
-            {trucks.map((truck) => (
-              <div key={truck.id} className="p-5 bg-slate-800 rounded-xl border border-slate-700 space-y-3">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h2 className="text-xl font-bold text-white">{truck.model || truck.name || 'Vrachtwagen'}</h2>
-                    {truck.year && <span className="text-xs text-slate-400">Bouwjaar: {truck.year}</span>}
-                  </div>
-                  <span className="px-2.5 py-1 bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 rounded font-mono text-xs font-semibold">
-                    {truck.license_plate}
-                  </span>
-                </div>
+            {trucks.map((truck) => {
+              const capacity = truck.tank_capacity_liters || truck.tank_capacity || 600;
+              const consumption = truck.avg_consumption_l_100km || truck.avg_consumption || 28.5;
+              const vehicleName = truck.model || truck.name || 'Vrachtwagen';
 
-                <div className="grid grid-cols-2 gap-2 text-xs text-slate-300 border-t border-slate-700 pt-3">
-                  <div>
-                    <span className="block text-slate-500">Tankinhoud</span>
-                    <span className="font-semibold">{truck.tank_capacity || 600} Liter</span>
-                  </div>
-                  <div>
-                    <span className="block text-slate-500">Gem. Verbruik</span>
-                    <span className="font-semibold">{truck.avg_consumption || 28.5} L / 100km</span>
-                  </div>
-                  {truck.mileage && (
+              return (
+                <div key={truck.id} className="p-5 bg-slate-800 rounded-xl border border-slate-700 space-y-3">
+                  <div className="flex justify-between items-start">
                     <div>
-                      <span className="block text-slate-500">KM-Stand</span>
-                      <span className="font-semibold">{Number(truck.mileage).toLocaleString('nl-NL')} km</span>
+                      <h2 className="text-xl font-bold text-white">{vehicleName}</h2>
+                      {truck.year && <span className="text-xs text-slate-400">Bouwjaar: {truck.year}</span>}
                     </div>
-                  )}
-                </div>
+                    <div className="flex items-center gap-2">
+                      <span className="px-2.5 py-1 bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 rounded font-mono text-xs font-semibold">
+                        {truck.license_plate}
+                      </span>
+                      <button
+                        onClick={() => handleDeleteTruck(truck.id, truck.license_plate)}
+                        disabled={deletingId === truck.id}
+                        title="Voertuig verwijderen"
+                        className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded transition disabled:opacity-50"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  </div>
 
-                {/* Duidelijke Verwijderknop onderaan elk kaartje */}
-                <div className="border-t border-slate-700/60 pt-3 flex justify-end">
-                  <button
-                    onClick={() => handleDeleteTruck(truck.id, truck.license_plate)}
-                    disabled={deletingId === truck.id}
-                    className="px-3 py-1.5 bg-red-600/20 hover:bg-red-600 text-red-300 hover:text-white border border-red-500/30 rounded text-xs font-semibold transition flex items-center gap-1.5 disabled:opacity-50"
-                  >
-                    🗑️ {deletingId === truck.id ? 'Verwijderen...' : 'Verwijder Voertuig'}
-                  </button>
+                  <div className="grid grid-cols-2 gap-2 text-xs text-slate-300 border-t border-slate-700 pt-3">
+                    <div>
+                      <span className="block text-slate-500">Tankinhoud</span>
+                      <span className="font-semibold">{capacity} Liter</span>
+                    </div>
+                    <div>
+                      <span className="block text-slate-500">Gem. Verbruik</span>
+                      <span className="font-semibold">{consumption} L / 100km</span>
+                    </div>
+                    {truck.mileage && (
+                      <div>
+                        <span className="block text-slate-500">KM-Stand</span>
+                        <span className="font-semibold">{Number(truck.mileage).toLocaleString('nl-NL')} km</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

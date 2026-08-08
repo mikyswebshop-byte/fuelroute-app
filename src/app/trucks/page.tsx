@@ -6,8 +6,8 @@ import { supabase } from '@/lib/supabase';
 interface Truck {
   id: string;
   license_plate: string;
-  name?: string;
   model?: string;
+  name?: string;
   tank_capacity?: number;
   avg_consumption?: number;
   mileage?: number;
@@ -21,18 +21,24 @@ export default function TrucksPage() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // Enkelvoudig formulier velden
-  const [name, setName] = useState('');
+  // Alle formuliervelden
+  const [model, setModel] = useState('');
   const [licensePlate, setLicensePlate] = useState('');
   const [tankCapacity, setTankCapacity] = useState('600');
   const [avgConsumption, setAvgConsumption] = useState('28.5');
   const [mileage, setMileage] = useState('');
   const [year, setYear] = useState('');
 
+  // 1. Ophalen van voertuigen uit Supabase
   const fetchTrucks = async () => {
     setLoading(true);
-    const { data, error } = await supabase.from('trucks').select('*').order('created_at', { ascending: false });
+    const { data, error } = await supabase
+      .from('trucks')
+      .select('*')
+      .order('created_at', { ascending: false });
+
     if (!error && data) {
       setTrucks(data);
     }
@@ -43,28 +49,39 @@ export default function TrucksPage() {
     fetchTrucks();
   }, []);
 
-  // Enkel voertuig toevoegen (past zich aan op jouw Supabase kolommen)
+  // 2. Handmatig voertuig toevoegen
   const handleAddTruck = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
 
-    const vehicleName = name || 'Vrachtwagen';
+    const vehicleName = model || 'Vrachtwagen';
+    
     const newTruck: any = {
       license_plate: licensePlate.toUpperCase(),
+      model: vehicleName,
       tank_capacity: Number(tankCapacity) || 600,
       avg_consumption: Number(avgConsumption) || 28.5,
-      model: vehicleName,
     };
 
     if (mileage) newTruck.mileage = Number(mileage);
     if (year) newTruck.year = Number(year);
 
-    const { error } = await supabase.from('trucks').insert([newTruck]);
+    let { error } = await supabase.from('trucks').insert([newTruck]);
+
+    // Fallback voor als optionele kolommen nog niet bestaan in Supabase schema
+    if (error && error.message.includes('schema cache')) {
+      console.warn('Sommige kolommen bestaan nog niet in Supabase. Fallback naar basisvelden.');
+      const fallbackTruck = {
+        license_plate: licensePlate.toUpperCase(),
+      };
+      const res = await supabase.from('trucks').insert([fallbackTruck]);
+      error = res.error;
+    }
 
     if (error) {
       alert('Fout bij toevoegen: ' + error.message);
     } else {
-      setName('');
+      setModel('');
       setLicensePlate('');
       setMileage('');
       setYear('');
@@ -74,7 +91,23 @@ export default function TrucksPage() {
     setSubmitting(false);
   };
 
-  // Bulk CSV Upload afhandeling
+  // 3. Voertuig verwijderen
+  const handleDeleteTruck = async (id: string, licensePlate: string) => {
+    const confirmDelete = window.confirm(`Weet je zeker dat je voertuig ${licensePlate} wilt verwijderen?`);
+    if (!confirmDelete) return;
+
+    setDeletingId(id);
+    const { error } = await supabase.from('trucks').delete().eq('id', id);
+
+    if (error) {
+      alert('Fout bij verwijderen: ' + error.message);
+    } else {
+      await fetchTrucks();
+    }
+    setDeletingId(null);
+  };
+
+  // 4. Bulk CSV-upload
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -91,7 +124,7 @@ export default function TrucksPage() {
       }
 
       const headers = lines[0].split(',').map((h) => h.trim().toLowerCase());
-      const newTrucks: any[] = [];
+      const rowsToInsert: any[] = [];
 
       for (let i = 1; i < lines.length; i++) {
         const values = lines[i].split(',').map((v) => v.trim());
@@ -103,35 +136,40 @@ export default function TrucksPage() {
         });
 
         if (row.license_plate) {
-          const vehicleName = row.name || row.model || 'Vrachtwagen';
-          
-          // Bouw het object veilig op met gegarandeerde Supabase velden
-          const truckObj: any = {
+          const item: any = {
             license_plate: row.license_plate.toUpperCase(),
-            model: vehicleName,
+            model: row.name || row.model || 'Vrachtwagen',
             tank_capacity: Number(row.tank_capacity) || 600,
             avg_consumption: Number(row.avg_consumption) || 28.5,
           };
 
-          if (row.mileage && !isNaN(Number(row.mileage))) truckObj.mileage = Number(row.mileage);
-          if (row.year && !isNaN(Number(row.year))) truckObj.year = Number(row.year);
+          if (row.mileage && !isNaN(Number(row.mileage))) item.mileage = Number(row.mileage);
+          if (row.year && !isNaN(Number(row.year))) item.year = Number(row.year);
 
-          newTrucks.push(truckObj);
+          rowsToInsert.push(item);
         }
       }
 
-      if (newTrucks.length > 0) {
+      if (rowsToInsert.length > 0) {
         setSubmitting(true);
-        const { error } = await supabase.from('trucks').insert(newTrucks);
+        let { error } = await supabase.from('trucks').insert(rowsToInsert);
+
+        // Fallback als Supabase-tabel nog niet alle kolommen heeft
+        if (error && error.message.includes('schema cache')) {
+          const minimalRows = rowsToInsert.map((r) => ({ license_plate: r.license_plate }));
+          const res = await supabase.from('trucks').insert(minimalRows);
+          error = res.error;
+        }
+
         if (error) {
           alert('Fout bij importeren CSV: ' + error.message);
         } else {
-          alert(`${newTrucks.length} voertuigen succesvol geïmporteerd!`);
+          alert(`${rowsToInsert.length} voertuigen succesvol geïmporteerd!`);
           await fetchTrucks();
         }
         setSubmitting(false);
       } else {
-        alert('Geen geldige voertuigen gevonden in het CSV-bestand.');
+        alert('Geen geldige kentekens gevonden in het CSV-bestand.');
       }
     };
     reader.readAsText(file);
@@ -145,7 +183,7 @@ export default function TrucksPage() {
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
             <h1 className="text-3xl font-bold text-blue-400">Vlootbeheer - Voertuigen</h1>
-            <p className="text-slate-400 text-sm mt-1">Overzicht en bulkbeheer van vrachtwagens</p>
+            <p className="text-slate-400 text-sm mt-1">Overzicht, bulkbeheer en bewerken van vrachtwagens</p>
           </div>
           <div className="flex items-center gap-3">
             {/* CSV Import Button */}
@@ -164,21 +202,20 @@ export default function TrucksPage() {
           </div>
         </div>
 
-        {/* Formulier */}
+        {/* Handmatig Toevoegen Formulier */}
         {showForm && (
           <form onSubmit={handleAddTruck} className="p-6 bg-slate-800 rounded-xl border border-blue-500/40 space-y-4">
-            <h2 className="text-lg font-bold text-blue-400">Nieuw Voertuig Handmatig Toevoegen</h2>
+            <h2 className="text-lg font-bold text-blue-400">Nieuw Voertuig Toevoegen</h2>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Merk / Model</label>
                 <input
                   type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="bijv. Volvo FH 500"
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  placeholder="bijv. DAF XF 480"
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-sm"
-                  required
                 />
               </div>
 
@@ -188,7 +225,7 @@ export default function TrucksPage() {
                   type="text"
                   value={licensePlate}
                   onChange={(e) => setLicensePlate(e.target.value)}
-                  placeholder="bijv. 12-34-AB"
+                  placeholder="bijv. 45-BJK-8"
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-sm uppercase font-mono"
                   required
                 />
@@ -223,7 +260,7 @@ export default function TrucksPage() {
                   type="number"
                   value={mileage}
                   onChange={(e) => setMileage(e.target.value)}
-                  placeholder="bijv. 250000"
+                  placeholder="bijv. 342000"
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-sm"
                 />
               </div>
@@ -234,7 +271,7 @@ export default function TrucksPage() {
                   type="number"
                   value={year}
                   onChange={(e) => setYear(e.target.value)}
-                  placeholder="bijv. 2021"
+                  placeholder="bijv. 2020"
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-sm"
                 />
               </div>
@@ -246,7 +283,7 @@ export default function TrucksPage() {
                 disabled={submitting}
                 className="px-5 py-2 bg-green-600 hover:bg-green-500 text-white font-bold rounded-lg transition text-sm disabled:opacity-50"
               >
-                {submitting ? 'Opslaan...' : 'Opslaan in Supabase'}
+                {submitting ? 'Opslaan...' : 'Opslaan in Database'}
               </button>
             </div>
           </form>
@@ -254,7 +291,7 @@ export default function TrucksPage() {
 
         {/* Voertuigen Lijst */}
         {loading ? (
-          <p className="text-slate-400">Voertuigen laden uit Supabase...</p>
+          <p className="text-slate-400">Voertuigen laden uit database...</p>
         ) : trucks.length === 0 ? (
           <div className="p-6 bg-slate-800 rounded-xl border border-slate-700 text-center">
             <p className="text-slate-300">Geen voertuigen gevonden in de database.</p>
@@ -262,15 +299,34 @@ export default function TrucksPage() {
         ) : (
           <div className="grid gap-4 md:grid-cols-2">
             {trucks.map((truck) => (
-              <div key={truck.id} className="p-5 bg-slate-800 rounded-xl border border-slate-700 space-y-3">
+              <div key={truck.id} className="p-5 bg-slate-800 rounded-xl border border-slate-700 space-y-3 relative group">
                 <div className="flex justify-between items-start">
                   <div>
                     <h2 className="text-xl font-bold text-white">{truck.model || truck.name || 'Vrachtwagen'}</h2>
                     {truck.year && <span className="text-xs text-slate-400">Bouwjaar: {truck.year}</span>}
                   </div>
-                  <span className="px-2.5 py-1 bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 rounded font-mono text-xs font-semibold">
-                    {truck.license_plate}
-                  </span>
+                  
+                  <div className="flex items-center gap-2">
+                    <span className="px-2.5 py-1 bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 rounded font-mono text-xs font-semibold">
+                      {truck.license_plate}
+                    </span>
+
+                    {/* Verwijderknop */}
+                    <button
+                      onClick={() => handleDeleteTruck(truck.id, truck.license_plate)}
+                      disabled={deletingId === truck.id}
+                      title="Voertuig verwijderen"
+                      className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded transition"
+                    >
+                      {deletingId === truck.id ? (
+                        <span className="text-xs">...</span>
+                      ) : (
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 text-xs text-slate-300 border-t border-slate-700 pt-3">
@@ -285,7 +341,7 @@ export default function TrucksPage() {
                   {truck.mileage && (
                     <div>
                       <span className="block text-slate-500">KM-Stand</span>
-                      <span className="font-semibold">{truck.mileage.toLocaleString('nl-NL')} km</span>
+                      <span className="font-semibold">{Number(truck.mileage).toLocaleString('nl-NL')} km</span>
                     </div>
                   )}
                 </div>

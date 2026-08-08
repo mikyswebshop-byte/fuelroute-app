@@ -1,10 +1,13 @@
 import type { Metadata } from 'next';
+import { Inter } from 'next/font/google';
 import Link from 'next/link';
 import './globals.css';
 
+const inter = Inter({ subsets: ['latin'] });
+
 export const metadata: Metadata = {
-  title: 'FuelRoute - Slimme Routeplanner',
-  description: 'Routeplanning en brandstofbeheer voor transport',
+  title: 'FuelRoute',
+  description: 'Slimme routeplanner voor brandstofbesparing',
 };
 
 export default function RootLayout({
@@ -14,27 +17,33 @@ export default function RootLayout({
 }) {
   return (
     <html lang="nl">
-      <body className="bg-slate-900 text-slate-100 min-h-screen flex flex-col">
-        <header className="border-b border-slate-800 bg-slate-950 px-6 py-4 flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <Link href="/" className="text-2xl font-bold text-blue-400 tracking-tight">
-              FuelRoute
+      <body className={`${inter.className} bg-slate-900 text-white min-h-screen flex flex-col`}>
+        <header className="border-b border-slate-800 bg-slate-950/50 backdrop-blur sticky top-0 z-50">
+          <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
+            <Link href="/" className="flex items-center gap-2">
+              <span className="text-xl font-black bg-gradient-to-r from-blue-400 to-indigo-500 bg-clip-text text-transparent">
+                FuelRoute
+              </span>
+              <span className="text-xs bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded border border-blue-500/20">
+                v1.0
+              </span>
             </Link>
-            <span className="text-xs px-2 py-0.5 bg-blue-950 text-blue-400 border border-blue-800 rounded font-mono">
-              v1.0
-            </span>
+
+            <nav className="flex gap-6 text-sm font-medium">
+              <Link href="/" className="hover:text-blue-400 transition-colors">
+                Tankstations
+              </Link>
+              <Link href="/planner" className="hover:text-blue-400 transition-colors">
+                Routeplanner
+              </Link>
+              <Link href="/trucks" className="hover:text-blue-400 transition-colors">
+                Voertuigen
+              </Link>
+            </nav>
           </div>
-          <nav className="flex gap-6 text-sm font-medium">
-            <Link href="/" className="text-slate-300 hover:text-white transition">
-              Tankstations
-            </Link>
-            <Link href="/planner" className="text-blue-400 font-semibold border-b-2 border-blue-400 pb-1">
-              Routeplanner
-            </Link>
-          </nav>
         </header>
 
-        <div className="flex-1">
+        <div className="flex-1 max-w-6xl w-full mx-auto p-4 md:p-6">
           {children}
         </div>
       </body>

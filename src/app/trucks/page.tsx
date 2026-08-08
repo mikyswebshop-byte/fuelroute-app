@@ -57,8 +57,7 @@ export default function TrucksPage() {
     const vehicleName = model || 'Vrachtwagen';
     const capacity = Number(tankCapacity) || 600;
     const consumption = Number(avgConsumption) || 28.5;
-    
-    // We vullen zowel de oude als nieuwe kolomnamen in zodat Supabase nooit klaagt
+
     const newTruck: any = {
       license_plate: licensePlate.toUpperCase(),
       model: vehicleName,
@@ -130,8 +129,12 @@ export default function TrucksPage() {
         });
 
         if (row.license_plate) {
-          const capacity = Number(row.tank_capacity_liters || row.tank_capacity) || 600;
-          const consumption = Number(row.avg_consumption_l_100km || row.avg_consumption) || 28.5;
+          const rawCapacity = row.tank_capacity_liters || row.tank_capacity;
+          const capacity = (rawCapacity && !isNaN(Number(rawCapacity))) ? Number(rawCapacity) : 600;
+          
+          const rawConsumption = row.avg_consumption_l_100km || row.avg_consumption;
+          const consumption = (rawConsumption && !isNaN(Number(rawConsumption))) ? Number(rawConsumption) : 28.5;
+          
           const vehicleName = row.name || row.model || 'Vrachtwagen';
 
           const item: any = {
@@ -173,7 +176,7 @@ export default function TrucksPage() {
     <main className="min-h-screen bg-slate-900 text-white p-6">
       <div className="max-w-4xl mx-auto space-y-6">
         
-        {/* Header met Actieknoppen */}
+        {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
             <h1 className="text-3xl font-bold text-blue-400">Vlootbeheer - Voertuigen</h1>
@@ -281,7 +284,7 @@ export default function TrucksPage() {
           </form>
         )}
 
-        {/* Voertuigen Lijst */}
+        {/* Lijst van voertuigen */}
         {loading ? (
           <p className="text-slate-400">Voertuigen laden uit database...</p>
         ) : trucks.length === 0 ? (

@@ -1,0 +1,100 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { supabase } from '@/lib/supabase';
+
+export default function HomePage() {
+  const [truckCount, setTruckCount] = useState<number>(0);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadStats() {
+      const { count } = await supabase.from('trucks').select('*', { count: 'exact', head: true });
+      if (count !== null) setTruckCount(count);
+      setLoading(false);
+    }
+    loadStats();
+  }, []);
+
+  return (
+    <main className="min-h-screen bg-slate-900 text-white p-6">
+      <div className="max-w-6xl mx-auto space-y-8">
+        
+        {/* Hero Banner */}
+        <div className="p-8 bg-gradient-to-r from-blue-900/60 to-slate-800 rounded-2xl border border-blue-500/30 space-y-4 shadow-xl">
+          <div className="inline-block px-3 py-1 bg-blue-500/20 border border-blue-400/30 rounded-full text-blue-300 text-xs font-bold uppercase tracking-wider">
+            FuelRoute v1.0 • Live
+          </div>
+          <h1 className="text-4xl font-extrabold text-white tracking-tight">
+            Gecentraliseerd Vlootbeheer & Dynamic Buffer Engine
+          </h1>
+          <p className="text-slate-300 max-w-2xl text-sm leading-relaxed">
+            Geavanceerde route- en brandstofplanning voor vrachtwagens. Houdt automatisch rekening met gewicht, weer, tachograaf-rusttijden, tankkaart-acceptaties en ESPORG-parkeerbeveiliging.
+          </p>
+          <div className="pt-2 flex flex-wrap gap-4">
+            <Link
+              href="/planner"
+              className="px-5 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition text-sm shadow-lg shadow-blue-600/30 flex items-center gap-2"
+            >
+              ⚡ Open Routeplanner Engine
+            </Link>
+            <Link
+              href="/trucks"
+              className="px-5 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold rounded-xl transition text-sm"
+            >
+              🚛 Beheer Voertuigen ({loading ? '...' : truckCount})
+            </Link>
+          </div>
+        </div>
+
+        {/* Dynamic Rerouting Live Monitor Indicator */}
+        <div className="p-5 bg-slate-800 rounded-xl border border-amber-500/40 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <span className="relative flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
+              </span>
+              <h2 className="text-base font-bold text-amber-400">Live Dynamic Buffer Guard (Active)</h2>
+            </div>
+            <span className="text-xs text-slate-400">Automatische GPS-synchronisatie: Actief</span>
+          </div>
+          <p className="text-xs text-slate-300">
+            Het systeem scant continu de routeomstandigheden. Bij onverwachte vertragingen, tegenwind of vollopende parkeerterreinen ontvangen chauffeurs 20 minuten vooraf een routewijziging.
+          </p>
+        </div>
+
+        {/* Snelle Modules Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          
+          <Link href="/trucks" className="p-6 bg-slate-800 hover:bg-slate-800/80 rounded-xl border border-slate-700 transition space-y-3 group">
+            <div className="text-3xl">🚛</div>
+            <h3 className="text-lg font-bold text-white group-hover:text-blue-400 transition">1. Voertuig- & Verbruiksvariabelen</h3>
+            <p className="text-xs text-slate-400">
+              Beheer kentekens, tankcapaciteiten (hoofd + secundair), Euro-normen, leeg-/geladen gewicht en specifieke chauffeurstijlen.
+            </p>
+          </Link>
+
+          <Link href="/planner" className="p-6 bg-slate-800 hover:bg-slate-800/80 rounded-xl border border-slate-700 transition space-y-3 group">
+            <div className="text-3xl">🗺️</div>
+            <h3 className="text-lg font-bold text-white group-hover:text-blue-400 transition">2. Route & Tachograaf Optimalisatie</h3>
+            <p className="text-xs text-slate-400">
+              Combineer tankstops met verplichte 45-minuten tachograafpauzes en bereken de keiharde maximale actieradius inclusief veiligheidsmarge.
+            </p>
+          </Link>
+
+          <Link href="/stations" className="p-6 bg-slate-800 hover:bg-slate-800/80 rounded-xl border border-slate-700 transition space-y-3 group">
+            <div className="text-3xl">⛽</div>
+            <h3 className="text-lg font-bold text-white group-hover:text-blue-400 transition">3. Tankstations & Parkeren</h3>
+            <p className="text-xs text-slate-400">
+              Filter op high-flow pompen, doorrijhoogte, geaccepteerde tankkaarten (DKV/UTA/Shell), ESPORG-beveiliging en beschikbare douches.
+            </p>
+          </Link>
+
+        </div>
+
+      </div>
+    </main>
+  );
+}

@@ -1,283 +1,289 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase';
-import { Truck } from '@/types/fuelroute';
+import { useMemo, useState } from 'react';
+import { ActionBar, ActionButton } from '@/components/ActionBar';
+import { AddVehicleModal } from '@/components/AddVehicleModal';
+import { DocumentUploadPanel } from '@/components/DocumentUploadPanel';
+import { useLanguage } from '@/components/LanguageProvider';
+import { RoleGate } from '@/components/RoleGate';
+import { ServiceRequestModal } from '@/components/ServiceRequestModal';
+import { scrollToId } from '@/lib/access';
+import {
+  fleetTrucks,
+  maintenanceSchedule,
+  type FleetTruckRow,
+  type MaintenanceItem,
+} from '@/lib/mock-data';
+import { telematicaLabel } from '@/lib/ui-labels';
+
+const MAINTENANCE_TYPE_LABEL: Record<MaintenanceItem['type'], string> = {
+  grote_beurt: 'Grote beurt',
+  banden: 'Bandenwissel',
+  olie: 'Olieverversing',
+  apk: 'APK / keuring',
+};
+
+function formatKm(n: number) {
+  return Math.max(0, n).toLocaleString('nl-NL');
+}
 
 export default function TrucksPage() {
-  const [trucks, setTrucks] = useState<Truck[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const { t } = useLanguage();
+  const [trucks, setTrucks] = useState<FleetTruckRow[]>(fleetTrucks);
+  const [filter, setFilter] = useState<'all' | 'online' | 'lowfuel'>('all');
+  const [showServiceModal, setShowServiceModal] = useState(false);
+  const [showAddVehicle, setShowAddVehicle] = useState(false);
+  const [serviceFlash, setServiceFlash] = useState<string | null>(null);
+  const [maintenanceList, setMaintenanceList] = useState<MaintenanceItem[]>(maintenanceSchedule);
 
-  // Uitgebreide formuliervelden
-  const [model, setModel] = useState('');
-  const [licensePlate, setLicensePlate] = useState('');
-  const [tankCapacity, setTankCapacity] = useState('800');
-  const [secondaryTank, setSecondaryTank] = useState('0');
-  const [avgConsumption, setAvgConsumption] = useState('28.5');
-  const [fuelType, setFuelType] = useState<'Diesel' | 'HVO100' | 'LNG'>('Diesel');
-  const [euroNorm, setEuroNorm] = useState<'Euro 5' | 'Euro 6' | 'Zero Emission'>('Euro 6');
-  const [cargoWeight, setCargoWeight] = useState('0');
-  const [hasCooling, setHasCooling] = useState(false);
+  const rows = useMemo(() => {
+    if (filter === 'online') return trucks.filter((t) => t.telematics === 'Online');
+    if (filter === 'lowfuel') return trucks.filter((t) => t.fuelLevel < 25);
+    return trucks;
+  }, [filter, trucks]);
 
-  const fetchTrucks = async () => {
-    setLoading(true);
-    const { data, error } = await supabase
-      .from('trucks')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (!error && data) {
-      setTrucks(data as Truck[]);
-    }
-    setLoading(false);
-  };
-
-  useEffect(() => {
-    fetchTrucks();
-  }, []);
-
-  const handleAddTruck = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSubmitting(true);
-
-    const vehicleName = model || 'Vrachtwagen';
-    const capacity = Number(tankCapacity) || 600;
-    const consumption = Number(avgConsumption) || 28.5;
-
-    const newTruck = {
-      license_plate: licensePlate.toUpperCase().trim(),
-      model: vehicleName,
-      tank_capacity_liters: capacity,
-      secondary_tank_liters: Number(secondaryTank) || 0,
-      avg_consumption: consumption,
-      fuel_type: fuelType,
-      euro_norm: euroNorm,
-      cargo_weight_ton: Number(cargoWeight) || 0,
-      has_cooling: hasCooling,
-      current_fuel_pct: 100,
-      min_reserve_pct: 10,
-    };
-
-    const { error } = await supabase.from('trucks').upsert([newTruck], { onConflict: 'license_plate' });
-
-    if (error) {
-      alert('Fout bij opslaan: ' + error.message);
-    } else {
-      setModel('');
-      setLicensePlate('');
-      setShowForm(false);
-      await fetchTrucks();
-    }
-    setSubmitting(false);
-  };
-
-  const handleDeleteTruck = async (id: string, licensePlate: string) => {
-    if (!window.confirm(`Voertuig ${licensePlate} verwijderen?`)) return;
-    setDeletingId(id);
-    await supabase.from('trucks').delete().eq('id', id);
-    await fetchTrucks();
-    setDeletingId(null);
-  };
-
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = async (evt) => {
-      try {
-        const text = (evt.target?.result as string || '').replace(/^\uFEFF/, '');
-        const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
-        if (lines.length < 2) return;
-
-        const delimiter = lines[0].includes(';') ? ';' : ',';
-        const parseLine = (line: string) => line.split(delimiter).map(v => v.trim().replace(/^["']|["']$/g, ''));
-        const headers = parseLine(lines[0]).map(h => h.toLowerCase());
-
-        const rowsMap = new Map();
-
-        for (let i = 1; i < lines.length; i++) {
-          const values = parseLine(lines[i]);
-          if (!values[0]) continue;
-
-          const rowData: Record<string, string> = {};
-          headers.forEach((h, idx) => { rowData[h] = values[idx] || ''; });
-
-          const plate = rowData['license_plate'] || rowData['kenteken'] || values[0];
-          if (plate && plate.length >= 4) {
-            const formattedPlate = plate.toUpperCase().trim();
-            const cap = Number((rowData['tank_capacity_liters'] || rowData['tankinhoud'] || '600').replace(',', '.'));
-            const cons = Number((rowData['avg_consumption'] || rowData['verbruik'] || '28.5').replace(',', '.'));
-
-            rowsMap.set(formattedPlate, {
-              license_plate: formattedPlate,
-              model: rowData['model'] || rowData['merk'] || 'Vrachtwagen',
-              tank_capacity_liters: isNaN(cap) ? 600 : cap,
-              avg_consumption: isNaN(cons) ? 28.5 : cons,
-              fuel_type: rowData['fuel_type'] || 'Diesel',
-              euro_norm: rowData['euro_norm'] || 'Euro 6',
-              current_fuel_pct: 100,
-              min_reserve_pct: 10,
-            });
-          }
-        }
-
-        const rows = Array.from(rowsMap.values());
-        if (rows.length > 0) {
-          setSubmitting(true);
-          await supabase.from('trucks').upsert(rows, { onConflict: 'license_plate' });
-          await fetchTrucks();
-          alert(`Gelukt! ${rows.length} voertuigen succesvol verwerkt met alle variabelen!`);
-        }
-      } catch (err: any) {
-        alert('Fout bij importeren: ' + err.message);
-      } finally {
-        setSubmitting(false);
-        e.target.value = '';
-      }
-    };
-    reader.readAsText(file);
-  };
+  const serviceTrucks = useMemo(
+    () => trucks.map((t) => ({ truckId: t.truckId, plate: t.licensePlate })),
+    [trucks]
+  );
 
   return (
-    <main className="min-h-screen bg-slate-900 text-white p-6">
-      <div className="max-w-5xl mx-auto space-y-6">
-        
-        {/* Header */}
+    <main className="min-h-screen p-6" style={{ background: '#0b0f19' }}>
+      <div className="max-w-7xl mx-auto space-y-6">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-blue-400">Vlootbeheer - Voertuigen</h1>
-            <p className="text-slate-400 text-sm mt-1">Gecentraliseerd beheer inclusief verbruik, gewicht en tankmarges</p>
+            <h1 className="text-3xl font-bold text-[#38bdf8]">{t('trucks_title')}</h1>
+            <p className="text-[#cbd5e1] text-sm mt-1">{t('trucks_subtitle')}</p>
           </div>
-          <div className="flex items-center gap-3">
-            <label className="cursor-pointer px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold rounded-lg transition text-sm flex items-center gap-2">
-              📁 Importeer CSV
-              <input type="file" accept=".csv" onChange={handleFileUpload} className="hidden" />
-            </label>
-
-            <button
-              onClick={() => setShowForm(!showForm)}
-              className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg transition text-sm"
-            >
-              {showForm ? '✖ Annuleren' : '+ Voertuig'}
-            </button>
+          <div className="flex items-center gap-2">
+            {(
+              [
+                ['all', 'Alle'],
+                ['online', 'Verbonden'],
+                ['lowfuel', 'Lage tank'],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setFilter(key)}
+                className={`px-3 py-2 rounded-lg text-xs font-bold border transition ${
+                  filter === key
+                    ? 'bg-sky-500/20 text-[#38bdf8] border-sky-500/40'
+                    : 'bg-[#1e293b] text-[#cbd5e1] border-slate-600'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
         </div>
 
-        {/* Handmatig Toevoegen Formulier met Alle Variabelen */}
-        {showForm && (
-          <form onSubmit={handleAddTruck} className="p-6 bg-slate-800 rounded-xl border border-blue-500/40 space-y-4">
-            <h2 className="text-lg font-bold text-blue-400">Nieuwe Truck & Variabelen Opslaan</h2>
-            
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">Merk / Model</label>
-                <input type="text" value={model} onChange={(e) => setModel(e.target.value)} placeholder="DAF XF 480" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm" />
-              </div>
+        <ActionBar title="Voertuigen & onderhoud">
+          <ActionButton variant="primary" onClick={() => setShowAddVehicle(true)}>
+            📷 Nieuw Voertuig
+          </ActionButton>
+          <ActionButton
+            variant="secondary"
+            onClick={() => {
+              setShowServiceModal(true);
+              scrollToId('trucks-onderhoud-sectie');
+            }}
+          >
+            🔧 Onderhoud Inplannen
+          </ActionButton>
+          <ActionButton
+            variant="utility"
+            onClick={() => scrollToId('voertuigdocumenten-upload')}
+          >
+            📄 Documenten Upload
+          </ActionButton>
+        </ActionBar>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">Kenteken</label>
-                <input type="text" value={licensePlate} onChange={(e) => setLicensePlate(e.target.value)} placeholder="45-BJK-8" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm font-mono" required />
-              </div>
+        <DocumentUploadPanel />
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">Brandstoftype</label>
-                <select value={fuelType} onChange={(e: any) => setFuelType(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm">
-                  <option value="Diesel">Diesel</option>
-                  <option value="HVO100">HVO100</option>
-                  <option value="LNG">LNG</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">Hoofdtank (Liters)</label>
-                <input type="number" value={tankCapacity} onChange={(e) => setTankCapacity(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm" required />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">Secundaire Tank (Liters)</label>
-                <input type="number" value={secondaryTank} onChange={(e) => setSecondaryTank(e.target.value)} placeholder="0" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm" />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">Gem. Verbruik (L/100km)</label>
-                <input type="number" step="0.1" value={avgConsumption} onChange={(e) => setAvgConsumption(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm" required />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">Lading Gewicht (Ton)</label>
-                <input type="number" value={cargoWeight} onChange={(e) => setCargoWeight(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm" />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">EmissieKlasse</label>
-                <select value={euroNorm} onChange={(e: any) => setEuroNorm(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm">
-                  <option value="Euro 6">Euro 6</option>
-                  <option value="Euro 5">Euro 5</option>
-                  <option value="Zero Emission">Zero Emission</option>
-                </select>
-              </div>
-
-              <div className="flex items-center gap-2 pt-6">
-                <input type="checkbox" id="cooling" checked={hasCooling} onChange={(e) => setHasCooling(e.target.checked)} className="w-4 h-4 rounded bg-slate-900 border-slate-700" />
-                <label htmlFor="cooling" className="text-sm text-slate-300">Koeltrailer aanwezig</label>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-3 pt-2">
-              <button type="submit" disabled={submitting} className="px-5 py-2 bg-green-600 hover:bg-green-500 text-white font-bold rounded-lg transition text-sm">
-                {submitting ? 'Opslaan...' : 'Opslaan in Database'}
-              </button>
-            </div>
-          </form>
+        {serviceFlash && (
+          <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm font-semibold text-emerald-300">
+            {serviceFlash}
+          </div>
         )}
 
-        {/* Voertuigen Grid met uitgebreide specificaties */}
-        {loading ? (
-          <p className="text-slate-400">Voertuigen & variabelen laden uit database...</p>
-        ) : (
-          <div className="grid gap-4 md:grid-cols-2">
-            {trucks.map((truck) => {
-              const capacity = (truck.tank_capacity_liters || 600) + (truck.secondary_tank_liters || 0);
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="bg-[#1e293b] border border-slate-700 rounded-xl p-4">
+            <span className="text-xs text-[#cbd5e1]">Actieve voertuigen</span>
+            <p className="text-xl font-black text-[#f8fafc] mt-1">{trucks.length}</p>
+          </div>
+          <div className="bg-[#1e293b] border border-slate-700 rounded-xl p-4">
+            <span className="text-xs text-[#cbd5e1]">EURO 6</span>
+            <p className="text-xl font-black text-[#38bdf8] mt-1">
+              {Math.round(
+                (trucks.filter((t) => t.euroNorm === 'Euro 6').length / Math.max(trucks.length, 1)) *
+                  100
+              )}
+              %
+            </p>
+          </div>
+          <div className="bg-[#1e293b] border border-slate-700 rounded-xl p-4">
+            <span className="text-xs text-[#cbd5e1]">Telematica Verbonden</span>
+            <p className="text-xl font-black text-[#10b981] mt-1">
+              {trucks.filter((t) => t.telematics === 'Online').length}
+            </p>
+          </div>
+          <div className="bg-[#1e293b] border border-slate-700 rounded-xl p-4">
+            <span className="text-xs text-[#cbd5e1]">Lage tank (&lt;25%)</span>
+            <p className="text-xl font-black text-amber-400 mt-1">
+              {trucks.filter((t) => t.fuelLevel < 25).length}
+            </p>
+          </div>
+        </div>
 
+        <div
+          id="trucks-onderhoud-sectie"
+          className="bg-[#1e293b] rounded-2xl border border-amber-500/30 p-5 space-y-4"
+        >
+          <div>
+            <h2 className="text-lg font-bold text-[#f8fafc]">🔧 Onderhoud & Bandenwissel Tracker</h2>
+            <p className="text-xs text-[#cbd5e1] mt-1">
+              Kilometerstand · volgende service · partnerwerkplaats
+            </p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {maintenanceList.map((item, idx) => {
+              const remaining = item.nextServiceKm - item.odometerKm;
               return (
-                <div key={truck.id} className="p-5 bg-slate-800 rounded-xl border border-slate-700 space-y-3">
-                  <div className="flex justify-between items-start">
+                <div
+                  key={`${item.truckId}-${item.type}-${idx}`}
+                  className="rounded-xl border border-slate-600 bg-slate-900/50 px-4 py-3 space-y-1.5"
+                >
+                  <div className="flex justify-between gap-2 items-start">
                     <div>
-                      <h2 className="text-xl font-bold text-white">{truck.model || 'Vrachtwagen'}</h2>
-                      <span className="text-xs text-blue-400 font-semibold">{truck.fuel_type || 'Diesel'} • {truck.euro_norm || 'Euro 6'}</span>
+                      <p className="text-sm font-bold font-mono text-[#38bdf8]">{item.truckId}</p>
+                      <p className="text-[11px] text-[#cbd5e1] font-mono">{item.plate}</p>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className="px-2.5 py-1 bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 rounded font-mono text-xs font-semibold">
-                        {truck.license_plate}
-                      </span>
-                      <button onClick={() => handleDeleteTruck(truck.id, truck.license_plate)} disabled={deletingId === truck.id} className="p-1.5 text-slate-400 hover:text-red-400">🗑️</button>
-                    </div>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold border border-amber-500/40 bg-amber-500/15 text-amber-200 shrink-0">
+                      {MAINTENANCE_TYPE_LABEL[item.type]}
+                    </span>
                   </div>
-
-                  <div className="grid grid-cols-3 gap-2 text-xs text-slate-300 border-t border-slate-700 pt-3">
-                    <div>
-                      <span className="block text-slate-500">Capaciteit</span>
-                      <span className="font-semibold">{capacity} Liter</span>
-                    </div>
-                    <div>
-                      <span className="block text-slate-500">Basisverbruik</span>
-                      <span className="font-semibold">{truck.avg_consumption || 28.5} L/100km</span>
-                    </div>
-                    <div>
-                      <span className="block text-slate-500">Veiligheidsreserve</span>
-                      <span className="font-semibold">{truck.min_reserve_pct || 10}%</span>
-                    </div>
-                  </div>
+                  <p className="text-sm font-semibold text-[#f8fafc]">{item.message}</p>
+                  <p className="text-xs text-[#cbd5e1]">
+                    Nog {formatKm(remaining)} km · teller {formatKm(item.odometerKm)} km
+                  </p>
+                  {item.partner && (
+                    <p className="text-[11px] text-slate-400">Partner · {item.partner}</p>
+                  )}
                 </div>
               );
             })}
           </div>
-        )}
+        </div>
+
+        <div
+          id="voertuig-tabel"
+          className="bg-[#1e293b] rounded-2xl border border-slate-700 overflow-hidden"
+        >
+          <div className="px-5 py-4 border-b border-slate-700 flex justify-between items-center">
+            <h2 className="text-lg font-bold text-[#f8fafc]">Voertuigbeheer Tabel</h2>
+            <span className="text-xs text-[#cbd5e1]">{rows.length} regels</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm text-left">
+              <thead className="bg-slate-900/60 text-[#cbd5e1] text-xs uppercase tracking-wide">
+                <tr>
+                  <th className="px-4 py-3">Truck-ID</th>
+                  <th className="px-4 py-3">Kenteken</th>
+                  <th className="px-4 py-3">Model</th>
+                  <th className="px-4 py-3">EURO-Status</th>
+                  <th className="px-4 py-3">Telematica</th>
+                  <th className="px-4 py-3">Brandstofniveau (%)</th>
+                  <RoleGate componentId="vehicle_costs">
+                    <th className="px-4 py-3">Tankinhoud</th>
+                    <th className="px-4 py-3">Verbruik</th>
+                  </RoleGate>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-700/60">
+                {rows.map((truck) => (
+                  <tr key={truck.truckId} className="hover:bg-slate-900/40">
+                    <td className="px-4 py-3 font-mono text-[#38bdf8]">{truck.truckId}</td>
+                    <td className="px-4 py-3">
+                      <span className="px-2 py-1 rounded border border-amber-500/30 bg-amber-500/10 text-amber-300 font-mono text-xs font-bold">
+                        {truck.licensePlate}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-[#f8fafc]">{truck.model}</td>
+                    <td className="px-4 py-3">
+                      <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-emerald-500/15 text-[#10b981] border border-emerald-500/30">
+                        {truck.euroNorm}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`px-2.5 py-1 rounded-full text-[11px] font-bold border ${
+                          truck.telematics === 'Online'
+                            ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                            : 'bg-slate-700/50 text-slate-300 border-slate-600'
+                        }`}
+                      >
+                        {telematicaLabel(truck.telematics)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={truck.fuelLevel < 20 ? 'text-amber-400 font-bold' : 'text-[#f8fafc]'}>
+                        {truck.fuelLevel.toFixed(1)}%
+                      </span>
+                    </td>
+                    <RoleGate componentId="vehicle_costs">
+                      <td className="px-4 py-3 text-[#cbd5e1]">{truck.tankCapacity} L</td>
+                      <td className="px-4 py-3 text-[#cbd5e1]">{truck.avgConsumption} L/100km</td>
+                    </RoleGate>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
+
+      {showServiceModal && (
+        <ServiceRequestModal
+          trucks={serviceTrucks}
+          onClose={() => setShowServiceModal(false)}
+          onSubmit={(req) => {
+            const truck = trucks.find((t) => t.truckId === req.truckId);
+            const plate = truck?.licensePlate ?? req.truckId;
+            const label = MAINTENANCE_TYPE_LABEL[req.type];
+            setServiceFlash(
+              `Serviceverzoek ingediend: ${label} voor ${req.truckId} bij ${req.partner}`
+            );
+            setMaintenanceList((prev) => [
+              {
+                truckId: req.truckId,
+                plate,
+                odometerKm: 0,
+                nextServiceKm: 0,
+                message: `${label} aangevraagd${req.note ? ` — ${req.note}` : ''}`,
+                type: req.type,
+                partner: req.partner,
+              },
+              ...prev,
+            ]);
+          }}
+        />
+      )}
+
+      {showAddVehicle && (
+        <AddVehicleModal
+          nextIndex={trucks.length + 1}
+          onClose={() => setShowAddVehicle(false)}
+          onAdd={(truck, draft) => {
+            setTrucks((prev) => [truck, ...prev]);
+            setServiceFlash(
+              `Voertuig toegevoegd via AI-scan: ${draft.licensePlate} · ${draft.model} · VIN ${draft.vin.slice(0, 8)}…`
+            );
+            scrollToId('voertuig-tabel');
+          }}
+        />
+      )}
     </main>
   );
 }

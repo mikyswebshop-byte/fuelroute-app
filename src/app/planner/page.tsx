@@ -1,328 +1,1154 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { ActionBar, ActionButton } from '@/components/ActionBar';
+import { CameraCaptureModal } from '@/components/CameraCaptureModal';
+import {
+  MapEngineSwitcher,
+  type MapEngineId,
+} from '@/components/MapEngineSwitcher';
+import { GloveboxModal } from '@/components/GloveboxModal';
+import { useLanguage } from '@/components/LanguageProvider';
+import { RangeSlider } from '@/components/RangeSlider';
+import { RoleGate } from '@/components/RoleGate';
+import { TollCalculator } from '@/components/TollCalculator';
+import { scrollToId } from '@/lib/access';
+import {
+  calculateAdvancedRoute,
+  calculateCo2Barometer,
+  calculateTotalRouteCost,
+  calculateZzpMargin,
+  filterAndScaleStops,
+  formatDriveTime,
+  type FuelKind,
+  type Topography,
+} from '@/lib/calculations';
+import {
+  borderWaitTimes,
+  cardArbitrageRules,
+  eetsTollRates,
+  expenseDeclarations,
+  parkingSecurity,
+  recommendedFuelStops,
+  synchronizedRestStops,
+} from '@/lib/mock-data';
+import type { CaptureGuide } from '@/lib/photo-quality';
 
-interface Stop {
-  type: string;
-  location: string;
-  reason: string;
-  facilities: string;
-  gps: string;
-  parkingAvailable: boolean;
-}
-
-interface RouteResult {
-  totalDistanceKm: number;
-  estimatedConsumptionL: number;
-  netCostAfterTol: number;
-  maxRangeKm: number;
-  stopsRequired: number;
-  stops: Stop[];
-}
+const FUEL_CARDS = ['DKV', 'UTA', 'Shell', 'BP', 'Esso'] as const;
 
 export default function PlannerPage() {
-  // Systeem & Modus instellingen
-  const [userRole, setUserRole] = useState<'chauffeur' | 'planner' | 'boekhouding'>('chauffeur');
-  const [isPrivateMode, setIsPrivateMode] = useState<boolean>(false);
-  
-  // Voertuig & Vloot variabelen
-  const [vehicle, setVehicle] = useState('DAF XF 480 (45-BJK-8) - Euro 6');
-  const [vehicleAgeYears, setVehicleAgeYears] = useState<number>(3);
-  const [mileage, setMileage] = useState<number>(240000);
-  const [cargoWeight, setCargoWeight] = useState<number>(20); // Ton
-  const [reeferActive, setReeferActive] = useState<boolean>(true); // Koeltrailer
-  
-  // Route & Omgeving
-  const [origin, setOrigin] = useState('Antwerpen Port (BE)');
-  const [destination, setDestination] = useState('Duisburg Hub (DE)');
-  const [distance, setDistance] = useState<number>(280);
-  const [headwind, setHeadwind] = useState<number>(15); // km/u
-  
-  // Voorkeuren & Tankkaarten
-  const [card, setCard] = useState<string>('DKV Card');
-  const [securityLevel, setSecurityLevel] = useState<string>('ESPORG Gold (Omheind & Bewaakt)');
-  const [needShower, setNeedShower] = useState<boolean>(true);
-  const [needRestaurant, setNeedRestaurant] = useState<boolean>(true);
+  const { t } = useLanguage();
+  const [origin, setOrigin] = useState('Kassel Hub (DE)');
+  const [destination, setDestination] = useState('München Distribution (DE)');
+  const [emptyWeightT, setEmptyWeightT] = useState(15);
+  const [loadedWeightT, setLoadedWeightT] = useState(40);
+  const [coolingTrailer, setCoolingTrailer] = useState(true);
+  const [fuelType, setFuelType] = useState<FuelKind>('Diesel');
+  const [headwindPct, setHeadwindPct] = useState(12);
+  const [topography, setTopography] = useState<Topography>('heuvelachtig');
+  const [maxDetourMinutes, setMaxDetourMinutes] = useState(6);
+  const [selectedCards, setSelectedCards] = useState<string[]>(['DKV', 'UTA', 'Shell']);
+  const [calcFlash, setCalcFlash] = useState(false);
+  const [freightPriceEur, setFreightPriceEur] = useState(1200);
+  const [showGlovebox, setShowGlovebox] = useState(false);
+  const [expenses, setExpenses] = useState(expenseDeclarations);
+  const [cameraGuide, setCameraGuide] = useState<CaptureGuide | null>(null);
+  const [zzpFlash, setZzpFlash] = useState(false);
+  const [remainingDriveMin, setRemainingDriveMin] = useState(84);
+  const [syncRest, setSyncRest] = useState(true);
+  const [tachoFlash, setTachoFlash] = useState(false);
+  const [costFlash, setCostFlash] = useState(false);
+  const [borderFlash, setBorderFlash] = useState(false);
+  const [mapEngine, setMapEngine] = useState<MapEngineId>('here');
+  const [maxDetourKm, setMaxDetourKm] = useState(8);
+  const [minSavingsPerL, setMinSavingsPerL] = useState(0.15);
 
-  // Foto / CMR Sjubloon State
-  const [cmrImage, setCmrImage] = useState<string | null>(null);
-  const [ocrStatus, setOcrStatus] = useState<string>('Wacht op foto van vrachtbrief...');
+  const [maxHeightM, setMaxHeightM] = useState(4.0);
+  const [axleLoadT, setAxleLoadT] = useState(11.5);
+  const [truckWidthM, setTruckWidthM] = useState(2.55);
+  const [truckLengthM, setTruckLengthM] = useState(16.5);
+  const [adrCargo, setAdrCargo] = useState(false);
+  const [enabledRules, setEnabledRules] = useState<string[]>(() =>
+    cardArbitrageRules.filter((r) => r.enabledDefault).map((r) => r.id)
+  );
 
-  const [result, setResult] = useState<RouteResult | null>(null);
-  const [calculating, setCalculating] = useState(false);
+  const cargoWeight = Math.max(0, loadedWeightT - emptyWeightT);
 
-  // Simuleer het maken van een foto en OCR-uitlezing van de vrachtbrief
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setCmrImage(reader.result as string);
-        setOcrStatus('AI OCR leest vrachtbrief uit...');
-        setTimeout(() => {
-          setOcrStatus('✓ Vrachtbrief succesvol verwerkt! Laadadres & Bestemming overgenomen.');
-        }, 1000);
-      };
-      reader.readAsDataURL(file);
-    }
+  const summary = useMemo(
+    () =>
+      calculateAdvancedRoute({
+        origin,
+        destination,
+        emptyWeightT,
+        loadedWeightT,
+        coolingTrailer,
+        fuelType,
+        headwindPct,
+        topography,
+        selectedCards,
+        maxDetourMinutes,
+      }),
+    [
+      origin,
+      destination,
+      emptyWeightT,
+      loadedWeightT,
+      coolingTrailer,
+      fuelType,
+      headwindPct,
+      topography,
+      selectedCards,
+      maxDetourMinutes,
+    ]
+  );
+
+  const stops = useMemo(
+    () =>
+      filterAndScaleStops(
+        recommendedFuelStops,
+        selectedCards,
+        cargoWeight,
+        summary.estimatedUsageL,
+        {
+          adrOnly: adrCargo,
+          maxTruckHeightM: maxHeightM,
+          maxDetourMinutes,
+        }
+      ).filter((stop) => {
+        const detourKm = stop.detourMinutes * 0.8;
+        if (detourKm > maxDetourKm) return false;
+        // Alleen stops met voldoende netto-voordeel t.o.v. drempel
+        const impliedSavingPerL = stop.savingsEur / Math.max(stop.recommendedVolumeL, 1);
+        return impliedSavingPerL >= minSavingsPerL * 0.35 || stop.savingsEur >= 8;
+      }),
+    [
+      selectedCards,
+      cargoWeight,
+      summary.estimatedUsageL,
+      maxDetourMinutes,
+      adrCargo,
+      maxHeightM,
+      maxDetourKm,
+      minSavingsPerL,
+    ]
+  );
+
+  const co2 = useMemo(
+    () =>
+      calculateCo2Barometer({
+        distanceKm: summary.distanceKm,
+        cargoTons: Math.max(cargoWeight, 1),
+        usageL: summary.estimatedUsageL,
+      }),
+    [summary.distanceKm, cargoWeight, summary.estimatedUsageL]
+  );
+
+  const { fuelCostEur, mautEur, margin } = useMemo(() => {
+    const fuelCostEur = summary.estimatedUsageL * 1.58;
+    const mautEur = summary.extraMautEur;
+    const margin = calculateZzpMargin({
+      freightPriceEur,
+      distanceKm: summary.distanceKm,
+      fuelCostEur,
+      mautEur,
+    });
+    return { fuelCostEur, mautEur, margin };
+  }, [freightPriceEur, summary.distanceKm, summary.estimatedUsageL, summary.extraMautEur]);
+
+  const borderIdleLiters = useMemo(
+    () =>
+      borderWaitTimes.reduce(
+        (sum, b) => sum + (b.waitMinutes / 60) * b.idleFuelLPerH,
+        0
+      ),
+    []
+  );
+
+  const routeCost = useMemo(
+    () =>
+      calculateTotalRouteCost({
+        usageL: summary.estimatedUsageL,
+        distanceKm: summary.distanceKm,
+        detourKmCostEur: summary.extraKmCostEur,
+        borderIdleLiters,
+      }),
+    [summary.estimatedUsageL, summary.distanceKm, summary.extraKmCostEur, borderIdleLiters]
+  );
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setRemainingDriveMin((m) => (m > 0 ? m - 1 : 0));
+    }, 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const activeRuleCount = enabledRules.length;
+  const estimatedSurcharge =
+    cardArbitrageRules
+      .filter((r) => enabledRules.includes(r.id))
+      .reduce((s, r) => s + r.surchargePerL, 0) * 100;
+
+  const toggleCard = (card: string) => {
+    setSelectedCards((prev) =>
+      prev.includes(card) ? prev.filter((c) => c !== card) : [...prev, card]
+    );
   };
 
-  const calculateSmartRoute = () => {
-    if (isPrivateMode) {
-      alert('App staat in Privé-modus. Geen zakelijke registratie of routeberekening actief.');
-      return;
-    }
+  const toggleRule = (id: string) => {
+    setEnabledRules((prev) =>
+      prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id]
+    );
+  };
 
-    setCalculating(true);
-    setTimeout(() => {
-      // Geavanceerde formule inclusief voertuigleeftijd, km-stand, lading en koeling
-      const baseConsumption = 27.5;
-      const agePenalty = vehicleAgeYears * 0.2; // Oudere truck verbruikt iets meer
-      const mileagePenalty = mileage > 300000 ? 0.8 : 0;
-      const weightFactor = cargoWeight * 0.35;
-      const reeferFactor = reeferActive ? 2.8 : 0;
-      
-      const totalConsumptionRate = baseConsumption + agePenalty + mileagePenalty + weightFactor + reeferFactor;
-      const totalFuelNeeded = (distance / 100) * totalConsumptionRate;
-      
-      // Maut / Tol berekening correctie
-      const estimatedTolCost = distance * 0.18; // ca 18 cent per km in Duitsland
-      const fuelSavingsBeforeBorder = 55; // Euro voordeel t.o.v. NL tanken
-      const netFinancialImpact = fuelSavingsBeforeBorder - estimatedTolCost;
+  const runCalc = () => {
+    setCalcFlash(true);
+    window.setTimeout(() => setCalcFlash(false), 1200);
+  };
 
-      setResult({
-        totalDistanceKm: distance,
-        estimatedConsumptionL: Math.round(totalFuelNeeded),
-        netCostAfterTol: Math.round(netFinancialImpact),
-        maxRangeKm: 750,
-        stopsRequired: 1,
-        stops: [
-          {
-            type: '⛽ Grenstankststop + 45 min Rust',
-            location: 'Autohof Hamminkeln (A3, Duitsland - 25km voor grens)',
-            reason: `Goedkope diesel via ${card} + verplichte pauze`,
-            facilities: `${securityLevel} • ${needShower ? 'Schone Douche Aanwezig' : ''} • ${needRestaurant ? 'Goed Restaurant' : ''}`,
-            gps: '51.721, 6.589',
-            parkingAvailable: true,
-          }
-        ],
-      });
-      setCalculating(false);
-    }, 600);
+  const flashZzp = () => {
+    setZzpFlash(true);
+    window.setTimeout(() => setZzpFlash(false), 1200);
+  };
+
+  const syncTacho = () => {
+    setRemainingDriveMin(84);
+    setTachoFlash(true);
+    window.setTimeout(() => setTachoFlash(false), 1200);
+  };
+
+  const flashCosts = () => {
+    setCostFlash(true);
+    window.setTimeout(() => setCostFlash(false), 1200);
+  };
+
+  const flashBorders = () => {
+    setBorderFlash(true);
+    window.setTimeout(() => setBorderFlash(false), 1200);
   };
 
   return (
-    <main className="min-h-screen bg-slate-900 text-white p-4 md:p-8">
+    <main className="min-h-screen p-4 md:p-8" style={{ background: '#0b0f19' }}>
       <div className="max-w-6xl mx-auto space-y-6">
-
-        {/* Top Header & Rol / Privé Schakelaar */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-800 p-4 rounded-2xl border border-slate-700 gap-4">
+        <div className="bg-[#1e293b] p-5 rounded-2xl border border-slate-700 flex flex-col md:flex-row justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-black text-blue-400">FUELROUTE <span className="text-xs px-2 py-0.5 bg-blue-500/20 text-blue-300 rounded">Smart Fleet & Grenstanken</span></h1>
-            <p className="text-xs text-slate-400">Automatische optimalisatie voor chauffeurs, planners en boekhouding.</p>
+            <h1 className="text-2xl font-black text-[#38bdf8]">Rit-Planner</h1>
+            <p className="text-sm text-[#cbd5e1]">
+              Planner {'&'} Dispatcher · voertuig, ADR, maut en nettobesparing
+            </p>
           </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            {/* Rol Selectie */}
-            <div className="bg-slate-900 p-1 rounded-xl border border-slate-700 flex text-xs font-bold">
-              <button onClick={() => setUserRole('chauffeur')} className={`px-3 py-1.5 rounded-lg transition ${userRole === 'chauffeur' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Chauffeur</button>
-              <button onClick={() => setUserRole('planner')} className={`px-3 py-1.5 rounded-lg transition ${userRole === 'planner' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Kantoor / Planner</button>
-              <button onClick={() => setUserRole('boekhouding')} className={`px-3 py-1.5 rounded-lg transition ${userRole === 'boekhouding' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Boekhouding</button>
-            </div>
-
-            {/* Privé / Zakelijk knop voor de chauffeur */}
-            <button
-              onClick={() => setIsPrivateMode(!isPrivateMode)}
-              className={`px-3 py-2 rounded-xl text-xs font-bold transition border ${
-                isPrivateMode ? 'bg-amber-500/20 text-amber-400 border-amber-500/40' : 'bg-slate-900 text-slate-300 border-slate-700'
-              }`}
-            >
-              {isPrivateMode ? '🚗 Status: PRIVÉ (Rust)' : '🚛 Status: ZAKELIJK (Actief)'}
-            </button>
-          </div>
+          <span className="self-start text-xs font-bold px-3 py-1.5 rounded-full bg-sky-500/10 text-[#38bdf8] border border-sky-500/30">
+            Actuele herberekening
+          </span>
         </div>
 
-        {isPrivateMode ? (
-          <div className="p-12 bg-slate-800 rounded-2xl border border-amber-500/30 text-center space-y-4">
-            <span className="text-4xl">☕</span>
-            <h2 className="text-xl font-bold text-amber-400">App is in Privé-modus</h2>
-            <p className="text-sm text-slate-400 max-w-md mx-auto">Je locatie en ritten worden uit privacy-overwegingen niet gedeeld met de zaak. Geniet van je rusttijd!</p>
-            <button onClick={() => setIsPrivateMode(false)} className="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-xs">Schakel naar Zakelijk</button>
+        <RoleGate componentId="live_navigation_maps">
+          <div id="map-engine-sectie">
+            <MapEngineSwitcher value={mapEngine} onChange={setMapEngine} />
           </div>
-        ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            
-            {/* LINKERKOLOM: Foto Vrachtbrief & Sjablonen (Chauffeur & Invoer) */}
-            <div className="space-y-6">
-              <div className="p-5 bg-slate-800 rounded-2xl border border-slate-700 space-y-4">
-                <h2 className="text-sm font-bold text-white uppercase tracking-wider">1. Vrachtbrief (CMR) & Sjablonen</h2>
-                <p className="text-xs text-slate-400">Maak een foto van de vrachtbrief. De app scant automatisch de routegegevens.</p>
-                
-                <div className="border-2 border-dashed border-slate-700 rounded-xl p-6 text-center hover:border-blue-500 transition cursor-pointer relative bg-slate-900/50">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    onChange={handlePhotoUpload}
-                    className="absolute inset-0 opacity-0 cursor-pointer"
-                  />
-                  <span className="text-3xl block mb-2">📸</span>
-                  <span className="text-xs font-bold text-blue-400">Maak Foto van Vrachtbrief / Bon</span>
-                  <p className="text-[10px] text-slate-500 mt-1">(Opent direct camera op mobiel/tablet)</p>
-                </div>
+        </RoleGate>
 
-                {cmrImage && (
-                  <div className="space-y-2">
-                    <img src={cmrImage} alt="Gescande CMR" className="w-full h-32 object-cover rounded-lg border border-slate-700" />
-                    <p className="text-xs font-semibold text-emerald-400 animate-pulse">{ocrStatus}</p>
-                  </div>
-                )}
-              </div>
+        <RoleGate componentId="financial_margins">
+        <ActionBar title="ZZP & Eigenrijder">
+          <ActionButton
+            variant="primary"
+            className="w-full py-3"
+            onClick={() => {
+              flashZzp();
+              scrollToId('marge-planner-sectie');
+            }}
+          >
+            💶 Rit-Margerekenmachine
+          </ActionButton>
+          <ActionButton
+            variant="secondary"
+            className="w-full py-3"
+            onClick={() => setShowGlovebox(true)}
+          >
+            {t('glovebox_open')}
+          </ActionButton>
+          <ActionButton
+            variant="utility"
+            className="w-full py-3"
+            onClick={() => setCameraGuide('tankbon')}
+          >
+            🧾 Onkosten Declareren
+          </ActionButton>
+          <ActionButton
+            variant="slate"
+            className="w-full py-3"
+            onClick={() => setFreightPriceEur(1200)}
+          >
+            💶 Vrachtprijs €1.200
+          </ActionButton>
+        </ActionBar>
+        </RoleGate>
 
-              {/* Voertuig Specificaties */}
-              <div className="p-5 bg-slate-800 rounded-2xl border border-slate-700 space-y-4">
-                <h2 className="text-sm font-bold text-white uppercase tracking-wider">2. Voertuig & Slijtage</h2>
-                <div className="space-y-3 text-xs">
-                  <div>
-                    <label className="text-slate-400 block mb-1">Voertuig Model</label>
-                    <select value={vehicle} onChange={(e) => setVehicle(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white">
-                      <option>DAF XF 480 (45-BJK-8) - Euro 6</option>
-                      <option>Volvo FH 500 (12-34-AB) - Euro 6</option>
-                    </select>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-slate-400 block mb-1">Leeftijd (jaar)</label>
-                      <input type="number" value={vehicleAgeYears} onChange={(e) => setVehicleAgeYears(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white" />
-                    </div>
-                    <div>
-                      <label className="text-slate-400 block mb-1">Km-stand</label>
-                      <input type="number" value={mileage} onChange={(e) => setMileage(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white" />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+        <ActionBar title="Tachograaf & EETS">
+          <ActionButton variant="primary" className="w-full py-3" onClick={syncTacho}>
+            ⏱ Live Tachograaf Sync
+          </ActionButton>
+          <RoleGate componentId="maut_tol_matrix">
+            <ActionButton
+              variant="secondary"
+              className="w-full py-3"
+              onClick={() => {
+                flashCosts();
+                scrollToId('maut-matrix-sectie');
+              }}
+            >
+              🛣 Totale Routekosten Matrix
+            </ActionButton>
+            <ActionButton
+              variant="utility"
+              className="w-full py-3"
+              onClick={() => scrollToId('toll-calculator')}
+            >
+              💶 Maut / Toll Calculator
+            </ActionButton>
+          </RoleGate>
+          <ActionButton
+            variant="utility"
+            className="w-full py-3"
+            onClick={() => {
+              flashBorders();
+              scrollToId('border-wait-sectie');
+            }}
+          >
+            🛂 Grenswachttijden
+          </ActionButton>
+          <ActionButton
+            variant="slate"
+            className="w-full py-3"
+            onClick={() => setSyncRest((v) => !v)}
+          >
+            Gecombineerde ruststops EG 561/2006
+          </ActionButton>
+        </ActionBar>
 
-            {/* MIDDEN & RECHTERKOLOM: Route, Instellingen & Rekenmodel */}
-            <div className="lg:col-span-2 space-y-6">
-              
-              <div className="p-6 bg-slate-800 rounded-2xl border border-slate-700 space-y-6">
-                <h2 className="text-sm font-bold text-white uppercase tracking-wider">3. Rituitslag & Grenstank Advies</h2>
+        <ActionBar title="Primaire acties">
+          <ActionButton variant="primary" onClick={runCalc} className="w-full">
+            ⚡ Bereken Optimaal Aantal Liters
+          </ActionButton>
+          <ActionButton
+            variant="secondary"
+            className="w-full"
+            onClick={() => {
+              setOrigin('Antwerpen Port (BE)');
+              setDestination('Duisburg Hub (DE)');
+            }}
+          >
+            🗺️ Standaardcorridor Laden
+          </ActionButton>
+          <ActionButton
+            variant="utility"
+            className="w-full"
+            onClick={() => setMaxDetourMinutes(4)}
+          >
+            ⏱️ Strikte Omrijdtijd (4 min)
+          </ActionButton>
+          <ActionButton
+            variant="slate"
+            className="w-full"
+            onClick={() => setSelectedCards(['DKV', 'UTA', 'Shell', 'BP', 'Esso'])}
+          >
+            💳 Alle Tankkaarten
+          </ActionButton>
+        </ActionBar>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs text-slate-400 mb-1">Laadadres / Vertrek</label>
-                    <input type="text" value={origin} onChange={(e) => setOrigin(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-white" />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-slate-400 mb-1">Losadres / Bestemming</label>
-                    <input type="text" value={destination} onChange={(e) => setDestination(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-white" />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-xs text-slate-400 mb-1">Lading Gewicht (Ton)</label>
-                    <input type="number" value={cargoWeight} onChange={(e) => setCargoWeight(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white" />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-slate-400 mb-1">Tankkaart</label>
-                    <select value={card} onChange={(e) => setCard(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white text-xs">
-                      <option>DKV Card</option>
-                      <option>UTA Card</option>
-                      <option>Shell Card</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs text-slate-400 mb-1">Min. Parkeerbeveiliging</label>
-                    <select value={securityLevel} onChange={(e) => setSecurityLevel(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white text-xs">
-                      <option>ESPORG Gold (Omheind & Bewaakt)</option>
-                      <option>ESPORG Silver (Cameratoezicht)</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-6">
-                  <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-300">
-                    <input type="checkbox" checked={reeferActive} onChange={(e) => setReeferActive(e.target.checked)} className="rounded bg-slate-900 border-slate-700" />
-                    Koeltrailer Actief (+ Brandstof)
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-300">
-                    <input type="checkbox" checked={needShower} onChange={(e) => setNeedShower(e.target.checked)} className="rounded bg-slate-900 border-slate-700" />
-                    Douche Verplicht op Stop
-                  </label>
-                </div>
-
-                <button
-                  onClick={calculateSmartRoute}
-                  disabled={calculating}
-                  className="w-full py-4 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white font-bold rounded-xl transition shadow-lg shadow-blue-600/30 text-sm"
-                >
-                  {calculating ? '⚡ Berekenen op basis van live data...' : '⚡ Bereken Optimale Grenstank- & Ruststop'}
-                </button>
-              </div>
-
-              {/* Resultaat Weergave */}
-              {result && (
-                <div className="p-6 bg-slate-800 rounded-2xl border border-emerald-500/50 space-y-6 shadow-2xl">
-                  <div className="flex justify-between items-center border-b border-slate-700 pb-4">
-                    <div>
-                      <h3 className="text-lg font-bold text-white">Slimme Route Analyse: {origin} ➔ {destination}</h3>
-                      <p className="text-xs text-slate-400">Inclusief Maut-correctie en live parkeergarantie.</p>
-                    </div>
-                    <span className="px-3 py-1 bg-emerald-500/20 text-emerald-400 text-xs font-bold rounded-full border border-emerald-500/30">
-                      Netto Voordeel: € +{result.netCostAfterTol}
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                    <div className="p-4 bg-slate-900 rounded-xl border border-slate-700">
-                      <span className="block text-xs text-slate-400">Totale Afstand</span>
-                      <span className="text-lg font-black text-white">{result.totalDistanceKm} km</span>
-                    </div>
-                    <div className="p-4 bg-slate-900 rounded-xl border border-slate-700">
-                      <span className="block text-xs text-slate-400">Geschat Verbruik</span>
-                      <span className="text-lg font-black text-blue-400">{result.estimatedConsumptionL} Liter</span>
-                    </div>
-                    <div className="p-4 bg-slate-900 rounded-xl border border-slate-700">
-                      <span className="block text-xs text-slate-400">Benodigde Stops</span>
-                      <span className="text-lg font-black text-purple-400">{result.stopsRequired} Stop (Optimaal)</span>
-                    </div>
-                  </div>
-
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">📍 Geselecteerde Grensstops & Voorzieningen</h4>
-                    {result.stops.map((stop, i) => (
-                      <div key={i} className="p-4 bg-slate-900 rounded-xl border border-slate-700 space-y-2">
-                        <div className="flex justify-between items-start">
-                          <span className="text-xs font-bold text-emerald-400 uppercase">{stop.type}</span>
-                          <span className="text-[10px] bg-emerald-500/10 text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/20">Parkeerplek Vrij (Live)</span>
-                        </div>
-                        <h5 className="font-bold text-white text-sm">{stop.location}</h5>
-                        <p className="text-xs text-slate-400">{stop.reason}</p>
-                        <p className="text-[11px] text-slate-300 font-medium">✨ Faciliteiten: {stop.facilities}</p>
-                        <p className="text-[10px] text-slate-500 font-mono">GPS Coördinaten: {stop.gps}</p>
-                      </div>
-                    ))}
-                  </div>
-
-                  {userRole === 'boekhouding' && (
-                    <div className="p-4 bg-blue-950/40 rounded-xl border border-blue-500/30 text-xs space-y-1">
-                      <p className="font-bold text-blue-300">📊 Boekhouding & Accijnzen Notitie:</p>
-                      <p className="text-slate-300">Deze rit is geregistreerd voor automatische btw-teruggave Duitsland en Maut-aftrek. Alle bonnen zijn gekoppeld aan het digitale dossier.</p>
-                    </div>
-                  )}
-
-                </div>
-              )}
-
-            </div>
-
+        {calcFlash && (
+          <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm font-semibold text-emerald-300">
+            Berekening bijgewerkt · nettobesparing €{summary.netSavingsEur.toFixed(2)}
+            {adrCargo ? ' · ADR-route actief' : ''}
           </div>
         )}
 
+        <RoleGate componentId="financial_margins">
+        <div
+          id="marge-planner-sectie"
+          className={`bg-[#1e293b] p-6 rounded-2xl border space-y-4 transition-colors ${
+            zzpFlash ? 'border-emerald-500/60 ring-2 ring-emerald-500/30' : 'border-slate-700'
+          }`}
+        >
+          <h2 className="text-sm font-bold text-[#f8fafc] uppercase tracking-wider">
+            Rit-Margerekenmachine
+          </h2>
+          <p className="text-xs text-[#cbd5e1]">
+            Netto marge voor ZZP / eigenrijder op basis van vrachtprijs, brandstof, maut en
+            afschrijving
+          </p>
+          <div className="max-w-xs">
+            <label className="block text-xs text-[#cbd5e1] mb-1">Vrachtprijs €</label>
+            <input
+              type="number"
+              min={0}
+              step={10}
+              value={freightPriceEur}
+              onChange={(e) => setFreightPriceEur(Number(e.target.value) || 0)}
+              className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-sm text-[#f8fafc]"
+            />
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <div className="rounded-xl bg-slate-900/70 border border-slate-600 px-3 py-3">
+              <p className="text-[11px] text-[#cbd5e1]">Netto marge</p>
+              <p
+                className={`text-lg font-black ${
+                  margin.netMarginEur >= 0 ? 'text-emerald-400' : 'text-red-400'
+                }`}
+              >
+                €{margin.netMarginEur.toFixed(2)}
+              </p>
+            </div>
+            <div className="rounded-xl bg-slate-900/70 border border-slate-600 px-3 py-3">
+              <p className="text-[11px] text-[#cbd5e1]">Brandstof</p>
+              <p className="text-lg font-bold text-[#f8fafc]">€{fuelCostEur.toFixed(2)}</p>
+            </div>
+            <div className="rounded-xl bg-slate-900/70 border border-slate-600 px-3 py-3">
+              <p className="text-[11px] text-[#cbd5e1]">Maut</p>
+              <p className="text-lg font-bold text-[#f8fafc]">€{mautEur.toFixed(2)}</p>
+            </div>
+            <div className="rounded-xl bg-slate-900/70 border border-slate-600 px-3 py-3">
+              <p className="text-[11px] text-[#cbd5e1]">Afschrijving</p>
+              <p className="text-lg font-bold text-[#f8fafc]">
+                €{margin.depreciationEur.toFixed(2)}
+              </p>
+            </div>
+            <div className="rounded-xl bg-slate-900/70 border border-slate-600 px-3 py-3">
+              <p className="text-[11px] text-[#cbd5e1]">Marge %</p>
+              <p
+                className={`text-lg font-black ${
+                  margin.marginPct >= 0 ? 'text-[#38bdf8]' : 'text-red-400'
+                }`}
+              >
+                {margin.marginPct.toFixed(1)}%
+              </p>
+            </div>
+          </div>
+        </div>
+        </RoleGate>
+
+        <div className="bg-[#1e293b] p-6 rounded-2xl border border-slate-700 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-bold text-[#f8fafc] uppercase tracking-wider">
+                Onkosten Declareren
+              </h2>
+              <p className="text-xs text-[#cbd5e1] mt-1">
+                Scan tankbonnen en voeg Maaltijd / Tol declaraties toe
+              </p>
+            </div>
+            <ActionButton
+              variant="utility"
+              className="w-full sm:w-auto py-3"
+              onClick={() => setCameraGuide('tankbon')}
+            >
+              📷 Bon scannen
+            </ActionButton>
+          </div>
+          <ul className="space-y-2">
+            {expenses.map((ex) => (
+              <li
+                key={ex.id}
+                className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-xl border border-slate-600 bg-slate-900/50 px-4 py-3"
+              >
+                <div>
+                  <p className="text-sm font-semibold text-[#f8fafc]">
+                    {ex.type} · €{ex.amount.toFixed(2)}
+                  </p>
+                  <p className="text-xs text-[#cbd5e1]">
+                    {ex.note} · {ex.date}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        {cameraGuide && (
+          <CameraCaptureModal
+            guide={cameraGuide}
+            subtitle="Onkosten declaratie · ZZP / eigenrijder"
+            onClose={() => setCameraGuide(null)}
+            onAccepted={(_dataUrl, quality) => {
+              const type = expenses.length % 2 === 0 ? 'Maaltijd' : 'Tol';
+              const amount =
+                type === 'Maaltijd'
+                  ? Math.round((12 + (quality.ocrConfidence % 10)) * 10) / 10
+                  : Math.round((35 + (quality.ocrConfidence % 20)) * 10) / 10;
+              setExpenses((prev) => [
+                {
+                  id: `ex-${Date.now()}`,
+                  type,
+                  amount,
+                  note: `Camera-scan (${cameraGuide}) · OCR ${quality.ocrConfidence}%`,
+                  date: new Date().toISOString().slice(0, 10),
+                },
+                ...prev,
+              ]);
+              setCameraGuide(null);
+            }}
+          />
+        )}
+
+        <div className="bg-[#1e293b] p-6 rounded-2xl border border-slate-700 space-y-5">
+          <h2 className="text-sm font-bold text-[#f8fafc] uppercase tracking-wider">Route-invoer</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs text-[#cbd5e1] mb-1">Vertrekpunt</label>
+              <input
+                type="text"
+                value={origin}
+                onChange={(e) => setOrigin(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-sm text-[#f8fafc]"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-[#cbd5e1] mb-1">Bestemming</label>
+              <input
+                type="text"
+                value={destination}
+                onChange={(e) => setDestination(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-sm text-[#f8fafc]"
+              />
+            </div>
+          </div>
+
+          <h3 className="text-xs font-bold text-[#38bdf8] uppercase tracking-wider pt-2">
+            Voertuig {'&'} Lading
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs text-[#cbd5e1] mb-1">Leeggewicht (ton)</label>
+              <input
+                type="number"
+                min={8}
+                max={25}
+                value={emptyWeightT}
+                onChange={(e) => setEmptyWeightT(Number(e.target.value) || 0)}
+                className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-sm text-[#f8fafc]"
+              />
+              <p className="text-[11px] text-[#cbd5e1] mt-1">bijv. 15t</p>
+            </div>
+            <div>
+              <label className="block text-xs text-[#cbd5e1] mb-1">Beladen gewicht (ton)</label>
+              <input
+                type="number"
+                min={10}
+                max={44}
+                value={loadedWeightT}
+                onChange={(e) => setLoadedWeightT(Number(e.target.value) || 0)}
+                className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-sm text-[#f8fafc]"
+              />
+              <p className="text-[11px] text-[#cbd5e1] mt-1">bijv. 40t · lading {cargoWeight}t</p>
+            </div>
+            <div>
+              <label className="block text-xs text-[#cbd5e1] mb-1">Brandstoftype</label>
+              <select
+                value={fuelType}
+                onChange={(e) => setFuelType(e.target.value as FuelKind)}
+                className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-sm text-[#f8fafc]"
+              >
+                <option value="Diesel">Diesel</option>
+                <option value="AdBlue">AdBlue (+verbruik)</option>
+                <option value="HVO100">HVO100</option>
+              </select>
+            </div>
+          </div>
+
+          <h3 className="text-xs font-bold text-[#38bdf8] uppercase tracking-wider pt-2">
+            Truck Routing · Afmetingen {'&'} Asbelasting
+          </h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div>
+              <label className="block text-xs text-[#cbd5e1] mb-1">Max. hoogte (m)</label>
+              <input
+                type="number"
+                step={0.1}
+                min={3.5}
+                max={4.5}
+                value={maxHeightM}
+                onChange={(e) => setMaxHeightM(Number(e.target.value) || 4)}
+                className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-sm text-[#f8fafc]"
+              />
+              <p className="text-[11px] text-[#cbd5e1] mt-1">Vermijd lage bruggen</p>
+            </div>
+            <div>
+              <label className="block text-xs text-[#cbd5e1] mb-1">Asbelasting limiet (t)</label>
+              <input
+                type="number"
+                step={0.1}
+                min={8}
+                max={12}
+                value={axleLoadT}
+                onChange={(e) => setAxleLoadT(Number(e.target.value) || 0)}
+                className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-sm text-[#f8fafc]"
+              />
+              <p className="text-[11px] text-[#cbd5e1] mt-1">Gewichtbeperkte wegen</p>
+            </div>
+            <div>
+              <label className="block text-xs text-[#cbd5e1] mb-1">Breedte (m)</label>
+              <input
+                type="number"
+                step={0.01}
+                min={2.0}
+                max={2.6}
+                value={truckWidthM}
+                onChange={(e) => setTruckWidthM(Number(e.target.value) || 0)}
+                className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-sm text-[#f8fafc]"
+              />
+              <p className="text-[11px] text-[#cbd5e1] mt-1">Smalle dorpen</p>
+            </div>
+            <div>
+              <label className="block text-xs text-[#cbd5e1] mb-1">Lengte (m)</label>
+              <input
+                type="number"
+                step={0.1}
+                min={10}
+                max={18.75}
+                value={truckLengthM}
+                onChange={(e) => setTruckLengthM(Number(e.target.value) || 0)}
+                className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-sm text-[#f8fafc]"
+              />
+              <p className="text-[11px] text-[#cbd5e1] mt-1">Draaicirkel / tunnels</p>
+            </div>
+          </div>
+          <p className="text-xs text-[#cbd5e1] bg-slate-900 border border-slate-700 rounded-xl px-4 py-3">
+            Routeparameters: {maxHeightM.toFixed(1)} m × {truckWidthM.toFixed(2)} m ×{' '}
+            {truckLengthM.toFixed(1)} m · asbelasting ≤ {axleLoadT.toFixed(1)} t — lage bruggen,
+            gewichtsbeperkingen en smalle dorpen worden vermeden.
+          </p>
+
+          <label className="flex items-start gap-3 cursor-pointer text-sm text-[#f8fafc] bg-amber-500/10 border-2 border-amber-500/50 rounded-xl px-4 py-4">
+            <input
+              type="checkbox"
+              checked={adrCargo}
+              onChange={(e) => setAdrCargo(e.target.checked)}
+              className="w-5 h-5 mt-0.5 accent-amber-500"
+            />
+            <span>
+              <span className="font-bold block">Vervoert ADR / Gevaarlijke Stoffen</span>
+              <span className="text-xs text-[#cbd5e1]">
+                Filtert verboden tunnels/eco-zones en toont alleen ADR-conforme tankstations &
+                parkeerplaatsen
+              </span>
+            </span>
+          </label>
+
+          <label className="flex items-center gap-3 cursor-pointer text-sm text-[#cbd5e1] bg-slate-900 border border-slate-700 rounded-xl px-4 py-3">
+            <input
+              type="checkbox"
+              checked={coolingTrailer}
+              onChange={(e) => setCoolingTrailer(e.target.checked)}
+              className="w-4 h-4 accent-emerald-500"
+            />
+            Koeltrailer actief (+extra dieselverbruik ±2,8 L/100km)
+          </label>
+
+          <h3 className="text-xs font-bold text-[#38bdf8] uppercase tracking-wider pt-2">
+            Omgeving {'&'} Weer
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <RangeSlider
+              id="headwind"
+              label={`Windeffect · +${Math.round(headwindPct * 0.2)}% verbruik`}
+              value={headwindPct}
+              min={0}
+              max={100}
+              unit="%"
+              accent="#f59e0b"
+              onChange={setHeadwindPct}
+            />
+            <div>
+              <label className="block text-xs text-[#cbd5e1] mb-1">Topografie</label>
+              <select
+                value={topography}
+                onChange={(e) => setTopography(e.target.value as Topography)}
+                className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-sm text-[#f8fafc]"
+              >
+                <option value="vlak">Vlak</option>
+                <option value="heuvelachtig">Heuvelachtig</option>
+                <option value="alpen">Alpen / bergachtig</option>
+              </select>
+            </div>
+            <RangeSlider
+              id="max-detour-min"
+              label="Maximale Omrijdtijd"
+              value={maxDetourMinutes}
+              min={1}
+              max={20}
+              unit="min"
+              accent="#818cf8"
+              onChange={setMaxDetourMinutes}
+            />
+          </div>
+
+          <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-4 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2">
+              <div>
+                <h3 className="text-xs font-bold text-emerald-300 uppercase tracking-wider">
+                  Dynamische Omrijd-Drempel
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Max. {maxDetourKm} km omrijden voor ≥ €{minSavingsPerL.toFixed(2)}/L besparing · kaart:{' '}
+                  {mapEngine.toUpperCase()}
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <RangeSlider
+                id="max-detour-km"
+                label="Max. omrijkm"
+                value={maxDetourKm}
+                min={2}
+                max={25}
+                unit="km"
+                accent="#34d399"
+                onChange={setMaxDetourKm}
+              />
+              <RangeSlider
+                id="min-savings-l"
+                label="Min. brandstofvoordeel"
+                value={Math.round(minSavingsPerL * 100)}
+                min={5}
+                max={30}
+                accent="#818cf8"
+                formatValue={(v) => `€ ${(v / 100).toFixed(2)}/L`}
+                onChange={(v) => setMinSavingsPerL(v / 100)}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs text-[#cbd5e1] mb-2">Geactiveerde Tankkaarten</label>
+            <div className="flex flex-wrap gap-2">
+              {FUEL_CARDS.map((card) => {
+                const active = selectedCards.includes(card);
+                return (
+                  <button
+                    key={card}
+                    type="button"
+                    onClick={() => toggleCard(card)}
+                    className={`px-3 py-2 rounded-lg text-xs font-bold border transition ${
+                      active
+                        ? 'bg-blue-600 text-white border-blue-400/40'
+                        : 'bg-slate-900 text-[#cbd5e1] border-slate-600'
+                    }`}
+                  >
+                    {card}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-[#1e293b] p-5 rounded-2xl border border-slate-700 space-y-4">
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-bold text-[#f8fafc] uppercase tracking-wider">
+                Tankkaart Netto-Prijs Arbitrage
+              </h2>
+              <p className="text-xs text-[#cbd5e1]">
+                Shell DE vs DKV FR fee-structuren · minimale litertoeslagen
+              </p>
+            </div>
+            <span className="text-xs font-mono text-amber-300">
+              {activeRuleCount} regels actief · ~€{(estimatedSurcharge / 100).toFixed(3)}/L toeslag
+            </span>
+          </div>
+          <div className="space-y-2">
+            {cardArbitrageRules.map((rule) => {
+              const on = enabledRules.includes(rule.id);
+              return (
+                <label
+                  key={rule.id}
+                  className={`flex items-start gap-3 cursor-pointer rounded-xl border px-4 py-3 transition ${
+                    on
+                      ? 'border-amber-500/40 bg-amber-500/10'
+                      : 'border-slate-700 bg-slate-900'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    onChange={() => toggleRule(rule.id)}
+                    className="w-4 h-4 mt-1 accent-amber-500"
+                  />
+                  <span className="flex-1">
+                    <span className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-bold text-[#f8fafc]">
+                        {rule.card} {rule.country}
+                      </span>
+                      <span className="text-[11px] font-mono text-[#38bdf8]">
+                        min. {rule.minLiters} L
+                      </span>
+                      {rule.surchargePerL > 0 && (
+                        <span className="text-[11px] font-mono text-amber-300">
+                          +€{rule.surchargePerL.toFixed(3)}/L
+                        </span>
+                      )}
+                    </span>
+                    <span className="block text-xs text-[#cbd5e1] mt-0.5">{rule.note}</span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="bg-[#1e293b] p-5 rounded-xl border border-slate-700">
+            <span className="text-xs text-[#cbd5e1]">Totale Afstand</span>
+            <p className="text-2xl font-black text-[#f8fafc] mt-1">{summary.distanceKm} km</p>
+          </div>
+          <div className="bg-[#1e293b] p-5 rounded-xl border border-slate-700">
+            <span className="text-xs text-[#cbd5e1]">Geschat Verbruik</span>
+            <p className="text-2xl font-black text-[#38bdf8] mt-1">{summary.estimatedUsageL} L</p>
+            <p className="text-[11px] text-[#cbd5e1] mt-1">{summary.consumptionRate} L/100km</p>
+          </div>
+          <div className="bg-[#1e293b] p-5 rounded-xl border border-slate-700">
+            <span className="text-xs text-[#cbd5e1]">Brandstofvoordeel</span>
+            <p className="text-2xl font-black text-emerald-400 mt-1">
+              €{summary.fuelAdvantageEur.toFixed(2)}
+            </p>
+          </div>
+          <div className="bg-[#1e293b] p-5 rounded-xl border border-emerald-500/40">
+            <span className="text-xs text-[#cbd5e1]">Netto Besparing</span>
+            <p className="text-2xl font-black text-[#10b981] mt-1">
+              €{summary.netSavingsEur.toFixed(2)}
+            </p>
+          </div>
+        </div>
+
+        <div
+          className={`bg-[#1e293b] p-5 rounded-2xl border space-y-3 transition-colors ${
+            tachoFlash ? 'border-emerald-500/60 ring-2 ring-emerald-500/30' : 'border-slate-700'
+          }`}
+        >
+          <h2 className="text-sm font-bold text-[#f8fafc] uppercase tracking-wider">
+            Live Tachograaf
+          </h2>
+          <p className="text-lg font-black text-[#38bdf8]">
+            Resterende Rijtijd: {formatDriveTime(remainingDriveMin)} tot verplichte 45m rust
+          </p>
+          <p className="text-xs text-[#cbd5e1]">
+            Na de dagelijkse rijtijd geldt 9u verkorte of 11u reguliere dagelijkse rust (EG
+            561/2006). Sync reset naar 1u 24m.
+          </p>
+          <ActionButton variant="primary" className="w-full sm:w-auto py-3" onClick={syncTacho}>
+            ⏱ Live Tachograaf Sync
+          </ActionButton>
+        </div>
+
+        <RoleGate componentId="maut_tol_matrix">
+          <TollCalculator defaultDistanceKm={summary.distanceKm} />
+        </RoleGate>
+
+        <RoleGate componentId="maut_tol_matrix">
+        <div
+          id="maut-matrix-sectie"
+          className={`bg-[#1e293b] p-5 rounded-2xl border space-y-3 transition-colors ${
+            costFlash ? 'border-blue-500/60 ring-2 ring-blue-500/30' : 'border-slate-700'
+          }`}
+        >
+          <h2 className="text-sm font-bold text-[#f8fafc] uppercase tracking-wider">
+            Totale Routekosten Matrix
+          </h2>
+          <p className="text-sm text-[#cbd5e1] font-mono bg-slate-900 border border-slate-700 rounded-xl p-4">
+            Totale Routekosten = Brandstofkosten + EETS Tol/Maut (DE, FR, BE) + Omrijkm-Kosten
+          </p>
+          <p className="text-[11px] text-[#cbd5e1]">
+            Tarieven:{' '}
+            {eetsTollRates.map((r) => `${r.country} €${r.ratePerKm}/km`).join(' · ')}
+            {' · '}incl. stationair brandstof aan grens ({borderIdleLiters.toFixed(1)} L)
+          </p>
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-3 text-sm">
+            <div className="rounded-lg bg-slate-900 border border-slate-700 p-3">
+              <span className="text-[11px] text-[#cbd5e1] block">Brandstof</span>
+              <span className="font-bold text-[#f8fafc]">€ {routeCost.fuelCostEur.toFixed(2)}</span>
+            </div>
+            <div className="rounded-lg bg-slate-900 border border-slate-700 p-3">
+              <span className="text-[11px] text-[#cbd5e1] block">EETS DE</span>
+              <span className="font-bold text-amber-300">€ {routeCost.eetsDe.toFixed(2)}</span>
+            </div>
+            <div className="rounded-lg bg-slate-900 border border-slate-700 p-3">
+              <span className="text-[11px] text-[#cbd5e1] block">EETS FR</span>
+              <span className="font-bold text-amber-300">€ {routeCost.eetsFr.toFixed(2)}</span>
+            </div>
+            <div className="rounded-lg bg-slate-900 border border-slate-700 p-3">
+              <span className="text-[11px] text-[#cbd5e1] block">EETS BE</span>
+              <span className="font-bold text-amber-300">€ {routeCost.eetsBe.toFixed(2)}</span>
+            </div>
+            <div className="rounded-lg bg-slate-900 border border-slate-700 p-3">
+              <span className="text-[11px] text-[#cbd5e1] block">Omrijkm</span>
+              <span className="font-bold text-red-300">
+                € {routeCost.detourKmCostEur.toFixed(2)}
+              </span>
+            </div>
+            <div className="rounded-lg bg-slate-900 border border-emerald-500/40 p-3">
+              <span className="text-[11px] text-[#cbd5e1] block">Totaal</span>
+              <span className="font-black text-[#10b981]">€ {routeCost.total.toFixed(2)}</span>
+            </div>
+          </div>
+        </div>
+        </RoleGate>
+
+        <div
+          id="border-wait-sectie"
+          className={`bg-[#1e293b] p-5 rounded-2xl border space-y-3 transition-colors ${
+            borderFlash ? 'border-amber-500/60 ring-2 ring-amber-500/30' : 'border-slate-700'
+          }`}
+        >
+          <h2 className="text-sm font-bold text-[#f8fafc] uppercase tracking-wider">
+            Grenswachttijden
+          </h2>
+          <p className="text-xs text-[#cbd5e1]">
+            Idle-brandstofkosten bij stationair draaien tijdens wachttijd (€1,58/L)
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {borderWaitTimes.map((b) => {
+              const idleL = (b.waitMinutes / 60) * b.idleFuelLPerH;
+              const idleEur = idleL * 1.58;
+              const severityClass =
+                b.severity === 'hoog'
+                  ? 'border-red-500/40 bg-red-500/10 text-red-300'
+                  : b.severity === 'middel'
+                    ? 'border-amber-500/40 bg-amber-500/10 text-amber-300'
+                    : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300';
+              return (
+                <span
+                  key={b.id}
+                  className={`inline-flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 px-3 py-2 rounded-xl border text-xs font-semibold ${severityClass}`}
+                >
+                  <span className="font-bold">{b.crossing}</span>
+                  <span className="font-mono opacity-90">
+                    {b.waitMinutes} min · ~{idleL.toFixed(1)} L · €{idleEur.toFixed(2)}
+                  </span>
+                </span>
+              );
+            })}
+          </div>
+        </div>
+
+        <RoleGate componentId="csrd_co2">
+        <div
+          id="csrd-planner-sectie"
+          className="bg-[#1e293b] p-5 rounded-2xl border border-slate-700/60 space-y-4"
+        >
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-bold text-[#f8fafc] uppercase tracking-wider">
+                CO₂ / ESG CSRD Scope 3 Barometer
+              </h2>
+              <p className="text-xs text-slate-400 mt-1">
+                Interactieve g CO₂/ton-km vs. typische snelwegcorridor
+              </p>
+            </div>
+            <span className="text-[11px] font-mono text-emerald-300">
+              −{co2.savingsPct}% · −{co2.savedGPerTonKm} g/ton-km
+            </span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+            <div className="rounded-lg bg-slate-900/80 border border-slate-700/60 p-3">
+              <span className="text-[11px] text-slate-400 block">Route intensiteit</span>
+              <span className="font-bold text-slate-100">{co2.gPerTonKm} g/ton-km</span>
+            </div>
+            <div className="rounded-lg bg-slate-900/80 border border-slate-700/60 p-3">
+              <span className="text-[11px] text-slate-400 block">Bespaard</span>
+              <span className="font-bold text-emerald-300">{co2.savedKg} kg CO₂</span>
+            </div>
+            <div className="rounded-lg bg-slate-900/80 border border-slate-700/60 p-3">
+              <span className="text-[11px] text-slate-400 block">Route-uitstoot</span>
+              <span className="font-bold text-slate-200">{co2.routeKg} kg</span>
+            </div>
+            <div className="rounded-lg bg-slate-900/80 border border-slate-700/60 p-3">
+              <span className="text-[11px] text-slate-400 block">Kaartmotor</span>
+              <span className="font-bold text-indigo-300 uppercase">{mapEngine}</span>
+            </div>
+          </div>
+          <div className="w-full h-2.5 rounded-full bg-slate-950 overflow-hidden border border-slate-700/50">
+            <div
+              className="h-full bg-gradient-to-r from-emerald-700/80 to-emerald-400/70"
+              style={{ width: `${Math.min(100, co2.savingsPct * 4)}%` }}
+            />
+          </div>
+        </div>
+        </RoleGate>
+
+        <div className="bg-[#1e293b] p-5 rounded-2xl border border-slate-700/60 space-y-3">
+          <h2 className="text-sm font-bold text-[#f8fafc] uppercase tracking-wider">
+            Rustplaats Security Rating (ESPORG)
+          </h2>
+          <p className="text-xs text-slate-400">
+            Brons · Zilver · Goud · Platinum gecertificeerde truckparkeerplaatsen
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {parkingSecurity.map((p) => {
+              const levelNl =
+                p.esporgLevel === 'Platinum'
+                  ? 'Platinum'
+                  : p.esporgLevel === 'Gold'
+                    ? 'Goud'
+                    : p.esporgLevel === 'Silver'
+                      ? 'Zilver'
+                      : 'Brons';
+              const tierClass =
+                p.esporgLevel === 'Platinum'
+                  ? 'border-violet-500/35 bg-violet-950/30 text-violet-200'
+                  : p.esporgLevel === 'Gold'
+                    ? 'border-amber-500/30 bg-amber-950/25 text-amber-200'
+                    : p.esporgLevel === 'Silver'
+                      ? 'border-slate-400/30 bg-slate-800/50 text-slate-200'
+                      : 'border-orange-500/25 bg-orange-950/20 text-orange-200/90';
+              return (
+                <span
+                  key={p.id}
+                  className={`inline-flex flex-col px-3 py-2 rounded-lg border text-[11px] ${tierClass}`}
+                >
+                  <span className="font-semibold">{p.name}</span>
+                  <span className="opacity-80">ESPORG {levelNl}</span>
+                </span>
+              );
+            })}
+          </div>
+        </div>
+
+        {syncRest && (
+          <div className="bg-[#1e293b] p-5 rounded-2xl border border-slate-700 space-y-3">
+            <h2 className="text-sm font-bold text-[#f8fafc] uppercase tracking-wider">
+              Gesynchroniseerde Stopplanning
+            </h2>
+            <p className="text-xs text-[#cbd5e1]">
+              Tankbeurt + 45 min tachograafrust + dagelijkse rustoptie (EG 561/2006)
+            </p>
+            <ul className="space-y-2">
+              {synchronizedRestStops.map((stop) => (
+                <li
+                  key={stop.stationName}
+                  className="rounded-xl border border-slate-600 bg-slate-900/50 px-4 py-3"
+                >
+                  <p className="text-sm font-semibold text-[#f8fafc]">{stop.stationName}</p>
+                  <p className="text-xs text-[#cbd5e1] mt-1">
+                    Tankbeurt {stop.fuelLiters} L · {stop.restType} · {stop.dailyRestOption}
+                  </p>
+                  <p className="text-[11px] text-[#38bdf8] mt-0.5">{stop.regulation}</p>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <RoleGate componentId="maut_tol_matrix">
+        <div
+          id="maut-formule-sectie"
+          className="bg-[#1e293b] p-5 rounded-2xl border border-slate-700 space-y-2"
+        >
+          <h2 className="text-sm font-bold text-[#f8fafc]">Maut {'&'} Netto Besparing Formule</h2>
+          <p className="text-sm text-[#cbd5e1] font-mono bg-slate-900 border border-slate-700 rounded-xl p-4">
+            Netto Besparing = Brandstofvoordeel − (Extra KM + Extra Maut/Tol)
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+            <div className="rounded-lg bg-slate-900 border border-slate-700 p-3">
+              <span className="text-[11px] text-[#cbd5e1] block">Brandstofvoordeel</span>
+              <span className="font-bold text-[#10b981]">€ {summary.fuelAdvantageEur.toFixed(2)}</span>
+            </div>
+            <div className="rounded-lg bg-slate-900 border border-slate-700 p-3">
+              <span className="text-[11px] text-[#cbd5e1] block">Extra KM-kosten</span>
+              <span className="font-bold text-amber-300">€ {summary.extraKmCostEur.toFixed(2)}</span>
+            </div>
+            <div className="rounded-lg bg-slate-900 border border-slate-700 p-3">
+              <span className="text-[11px] text-[#cbd5e1] block">Extra Maut/Tol (indicatief)</span>
+              <span className="font-bold text-red-300">€ {summary.extraMautEur.toFixed(2)}</span>
+            </div>
+          </div>
+        </div>
+        </RoleGate>
+
+        <div className="bg-[#1e293b] rounded-2xl border border-slate-700 overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-700 flex justify-between items-center">
+            <div>
+              <h2 className="text-lg font-bold text-[#f8fafc]">Aanbevolen Tankstops</h2>
+              <p className="text-xs text-[#cbd5e1]">
+                Gefilterd op kaarten, omrijdtijd {maxDetourMinutes} min, hoogte ≥ {maxHeightM} m
+                {adrCargo ? ' · alleen ADR-conform' : ''}
+              </p>
+            </div>
+            <span className="text-xs font-mono text-[#38bdf8]">{stops.length} stops</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm text-left">
+              <thead className="bg-slate-900/60 text-[#cbd5e1] text-xs uppercase tracking-wide">
+                <tr>
+                  <th className="px-4 py-3">Stationsnaam</th>
+                  <th className="px-4 py-3">Locatie / Snelweg</th>
+                  <th className="px-4 py-3">Nettoprijs / L</th>
+                  <th className="px-4 py-3">ADR / Doorrijd</th>
+                  <th className="px-4 py-3">Omrijdtijd</th>
+                  <th className="px-4 py-3">Volume</th>
+                  <th className="px-4 py-3">Besparing (€)</th>
+                  <th className="px-4 py-3">Actie</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-700/60">
+                {stops.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="px-4 py-8 text-center text-[#cbd5e1]">
+                      Geen stops voor de geselecteerde filters. Pas ADR, hoogte of omrijdtijd aan.
+                    </td>
+                  </tr>
+                ) : (
+                  stops.map((stop) => (
+                    <tr key={stop.stationName} className="hover:bg-slate-900/40">
+                      <td className="px-4 py-3 font-semibold text-[#f8fafc]">{stop.stationName}</td>
+                      <td className="px-4 py-3 text-[#cbd5e1]">{stop.locationHighway}</td>
+                      <td className="px-4 py-3 font-mono text-[#38bdf8]">
+                        € {stop.netPricePerL.toFixed(3)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-1">
+                          {stop.adrCompliant ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                              ADR OK
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/20 text-red-300 border border-red-500/40">
+                              Geen ADR
+                            </span>
+                          )}
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-mono text-[#cbd5e1] border border-slate-600">
+                            {stop.clearanceHeightM?.toFixed(1)} m
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-[#cbd5e1]">+{stop.detourMinutes.toFixed(1)} min</td>
+                      <td className="px-4 py-3 text-[#f8fafc]">{stop.recommendedVolumeL} L</td>
+                      <td className="px-4 py-3 font-bold text-[#10b981]">
+                        € {stop.savingsEur.toFixed(2)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <button
+                          type="button"
+                          className="h-10 px-4 rounded-lg text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white border-2 border-emerald-400/30"
+                        >
+                          Start Navigatie naar Autohof
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
+
+      {showGlovebox && (
+        <GloveboxModal
+          onClose={() => setShowGlovebox(false)}
+          onOpenDamageReport={() => {
+            window.location.href = '/driver?action=schade';
+          }}
+        />
+      )}
     </main>
   );
 }

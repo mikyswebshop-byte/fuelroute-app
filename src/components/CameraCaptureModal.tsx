@@ -145,7 +145,10 @@ export function CameraCaptureModal({
     };
   }, [mode]);
 
-  const runValidation = (source: HTMLVideoElement | HTMLImageElement) => {
+  const runValidation = (
+    source: HTMLVideoElement | HTMLImageElement,
+    opts?: { fromFile?: boolean }
+  ) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const w = 'videoWidth' in source ? source.videoWidth || 640 : source.naturalWidth || 640;
@@ -161,16 +164,22 @@ export function CameraCaptureModal({
     setResult(null);
 
     window.setTimeout(() => {
-      const quality = assessPhotoQuality(canvas, guide);
+      const fromFile = opts?.fromFile ?? false;
+      const docGuide = guide === 'cmr' || guide === 'tankbon';
+      const quality = assessPhotoQuality(canvas, guide, {
+        failBias: 0,
+        // Galerij/bestand of CMR/tankbon: nooit afkeuren op “belichting/kader”
+        forceAccept: fromFile || docGuide,
+      });
       setChecking(false);
       setResult(quality);
       if (quality.ok) {
         setToast(quality.passMessage);
         window.setTimeout(() => {
           onAccepted(dataUrl, quality);
-        }, 650);
+        }, 400);
       }
-    }, 420);
+    }, 280);
   };
 
   const captureFromCamera = () => {
@@ -186,7 +195,7 @@ export function CameraCaptureModal({
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
-      runValidation(img);
+      runValidation(img, { fromFile: true });
       URL.revokeObjectURL(url);
     };
     img.onerror = () => {

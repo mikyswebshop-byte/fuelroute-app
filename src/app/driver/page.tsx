@@ -364,15 +364,22 @@ export default function DriverPage() {
           unreadMessages={unreadMessages}
           onEmergency={openPechhulp}
           onOpenSignature={openSignature}
+          onOpenBonScan={() =>
+            setCameraSession({
+              guide: 'tankbon',
+              label: 'Bon / CMR foto',
+              context: { kind: 'doc', docType: 'tankbon' },
+            })
+          }
           parkedChildren={
             <div className="space-y-3">
               <TelemetryStatusBar />
-              <div className="rounded-2xl border border-slate-700 bg-[#1e293b] p-4 text-sm text-slate-300">
-                <p className="font-bold text-slate-100 mb-1">Gedetailleerde telemetrie</p>
-                <p>
+              <div className="fr-glass p-4 text-sm text-[var(--fr-text-muted)]">
+                <p className="fr-display text-base mb-1">Gedetailleerde telemetrie</p>
+                <p className="fr-mono text-xs">
                   RPM {telemetry.engineRpm} · Ping {pingMs} ms · Kaart {activeCard}
                 </p>
-                <p className="text-xs text-slate-500 mt-1">
+                <p className="text-xs text-[#6b7a90] mt-1">
                   {gpsTrackingEnabled ? 'GPS online' : 'GPS uit'} ·{' '}
                   {offlineMode ? 'Offline buffer actief' : 'Online'}
                 </p>
@@ -382,28 +389,26 @@ export default function DriverPage() {
         />
 
         {showPechhulp && (
-          <div className="fixed inset-0 z-50 bg-black/70 flex items-end md:items-center justify-center p-4">
-            <div className="w-full max-w-lg bg-[#1e293b] border-2 border-red-500/50 rounded-2xl p-5 space-y-4 shadow-2xl">
+          <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end md:items-center justify-center p-4">
+            <div className="w-full max-w-lg fr-glass border border-[#ff3b30]/40 p-5 space-y-4 shadow-2xl">
               <div className="flex justify-between items-start gap-3">
                 <div>
-                  <h3 className="text-lg font-black text-red-300">🆘 Pechhulp / Noodgeval</h3>
-                  <p className="text-xs text-[#cbd5e1]">
+                  <h3 className="fr-display text-lg text-[#ff8a82]">🆘 Pechhulp / Noodgeval</h3>
+                  <p className="text-xs text-[var(--fr-text-muted)] mt-1">
                     Protocol actief · GPS gedeeld met planner {'&'} pechdienst
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setShowPechhulp(false)}
-                  className="text-[#cbd5e1] hover:text-white text-sm"
+                  className="text-[#9aa8bc] hover:text-white text-sm"
                 >
                   Sluiten
                 </button>
               </div>
-              <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
-                <p className="text-[11px] font-bold uppercase tracking-wider text-[#38bdf8]">
-                  GPS-positie
-                </p>
-                <p className="text-xl font-mono font-black text-[#f8fafc]">51.312, 9.479</p>
+              <div className="rounded-[12px] border border-[#1e2a3a] bg-[#050a0f] p-4">
+                <p className="fr-label text-[#00a3ff]">GPS-positie</p>
+                <p className="fr-mono text-xl font-bold text-[#f2f6fb] mt-1">51.312, 9.479</p>
               </div>
               <ActionButton variant="danger" className="w-full" onClick={() => setShowPechhulp(false)}>
                 Bevestig pechmelding
@@ -421,6 +426,15 @@ export default function DriverPage() {
               setSignatureInfo({ name: signerName, dataUrl });
               setShowSignature(false);
             }}
+          />
+        )}
+
+        {cameraSession && (
+          <CameraCaptureModal
+            guide={cameraSession.guide}
+            subtitle={cameraSession.label}
+            onClose={() => setCameraSession(null)}
+            onAccepted={onCameraAccepted}
           />
         )}
       </>

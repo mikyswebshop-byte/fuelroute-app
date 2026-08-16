@@ -1,9 +1,9 @@
 'use client';
 
-/** Analog-style speed needle for drive simulation. */
+/** Semi-circular glowing speed gauge — design kit §19 */
 export function SpeedGauge({
   speedKmh,
-  max = 120,
+  max = 140,
   label = 'km/h',
 }: {
   speedKmh: number;
@@ -11,50 +11,92 @@ export function SpeedGauge({
   label?: string;
 }) {
   const clamped = Math.max(0, Math.min(max, speedKmh));
-  // Needle sweep from -120deg to +120deg
-  const angle = -120 + (clamped / max) * 240;
+  const r = 70;
+  const c = Math.PI * r; // semicircle length
+  const progress = clamped / max;
+  const dash = c * progress;
+  const needleAngle = -90 + progress * 180;
 
   return (
-    <div className="relative w-40 h-40 mx-auto select-none">
-      <svg viewBox="0 0 200 200" className="w-full h-full">
-        <circle cx="100" cy="100" r="88" fill="#0f172a" stroke="#334155" strokeWidth="4" />
-        {Array.from({ length: 13 }, (_, i) => {
-          const a = ((-120 + i * 20) * Math.PI) / 180;
-          const x1 = 100 + Math.cos(a) * 70;
-          const y1 = 100 + Math.sin(a) * 70;
-          const x2 = 100 + Math.cos(a) * 82;
-          const y2 = 100 + Math.sin(a) * 82;
+    <div className="relative w-full max-w-[200px] aspect-square mx-auto select-none">
+      <svg viewBox="0 0 200 200" className="w-full h-full overflow-visible">
+        <defs>
+          <linearGradient id="speedArc" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="#007aff" />
+            <stop offset="100%" stopColor="#00a3ff" />
+          </linearGradient>
+          <filter id="speedGlow" x="-40%" y="-40%" width="180%" height="180%">
+            <feGaussianBlur stdDeviation="3.5" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
+        {/* Track */}
+        <path
+          d="M 30 140 A 70 70 0 0 1 170 140"
+          fill="none"
+          stroke="#1e2a3a"
+          strokeWidth="12"
+          strokeLinecap="round"
+        />
+        {/* Glow arc */}
+        <path
+          d="M 30 140 A 70 70 0 0 1 170 140"
+          fill="none"
+          stroke="url(#speedArc)"
+          strokeWidth="12"
+          strokeLinecap="round"
+          strokeDasharray={`${dash} ${c}`}
+          filter="url(#speedGlow)"
+          style={{ transition: 'stroke-dasharray 0.2s linear' }}
+        />
+        {/* Ticks */}
+        {[0, 0.25, 0.5, 0.75, 1].map((t) => {
+          const a = ((-180 + t * 180) * Math.PI) / 180;
+          const x1 = 100 + Math.cos(a) * 78;
+          const y1 = 140 + Math.sin(a) * 78;
+          const x2 = 100 + Math.cos(a) * 88;
+          const y2 = 140 + Math.sin(a) * 88;
           return (
             <line
-              key={i}
+              key={t}
               x1={x1}
               y1={y1}
               x2={x2}
               y2={y2}
-              stroke={i > 9 ? '#f87171' : '#64748b'}
-              strokeWidth={i % 2 === 0 ? 3 : 1.5}
+              stroke="#2a3a50"
+              strokeWidth="2"
             />
           );
         })}
-        <g style={{ transform: `rotate(${angle}deg)`, transformOrigin: '100px 100px' }}>
+        <g
+          style={{
+            transform: `rotate(${needleAngle}deg)`,
+            transformOrigin: '100px 140px',
+            transition: 'transform 0.15s linear',
+          }}
+        >
           <line
             x1="100"
-            y1="100"
+            y1="140"
             x2="100"
-            y2="28"
-            stroke="#38bdf8"
-            strokeWidth="3"
+            y2="78"
+            stroke="#00a3ff"
+            strokeWidth="2.5"
             strokeLinecap="round"
-            style={{ transition: 'transform 0.12s linear' }}
+            style={{ filter: 'drop-shadow(0 0 6px rgba(0,163,255,0.8))' }}
           />
         </g>
-        <circle cx="100" cy="100" r="8" fill="#f8fafc" />
+        <circle cx="100" cy="140" r="6" fill="#00a3ff" />
+        <circle cx="100" cy="140" r="3" fill="#f2f6fb" />
       </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-end pb-6 pointer-events-none">
-        <span className="text-2xl font-black tabular-nums text-[#f8fafc]">
+      <div className="absolute inset-x-0 bottom-6 flex flex-col items-center pointer-events-none">
+        <span className="fr-display text-3xl tabular-nums tracking-tight leading-none">
           {Math.round(clamped)}
         </span>
-        <span className="text-[10px] uppercase tracking-wider text-slate-400">{label}</span>
+        <span className="fr-label mt-1">{label}</span>
       </div>
     </div>
   );

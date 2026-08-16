@@ -3,11 +3,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ActionBar, ActionButton } from '@/components/ActionBar';
 import { CameraCaptureModal } from '@/components/CameraCaptureModal';
+import { ActiveCmrBanner, CmrImportPanel } from '@/components/CmrImportPanel';
 import {
   MapEngineSwitcher,
   type MapEngineId,
 } from '@/components/MapEngineSwitcher';
 import { GloveboxModal } from '@/components/GloveboxModal';
+import { RouteMap } from '@/components/RouteMap';
 import { useLanguage } from '@/components/LanguageProvider';
 import { RangeSlider } from '@/components/RangeSlider';
 import { RoleGate } from '@/components/RoleGate';
@@ -23,6 +25,7 @@ import {
   type FuelKind,
   type Topography,
 } from '@/lib/calculations';
+import { applyCmrToPlannerFields, getActiveCmr, type CmrShipment } from '@/lib/cmr-store';
 import {
   borderWaitTimes,
   cardArbitrageRules,
@@ -33,6 +36,7 @@ import {
   synchronizedRestStops,
 } from '@/lib/mock-data';
 import type { CaptureGuide } from '@/lib/photo-quality';
+import { DEMO_GPS } from '@/lib/gps';
 
 const FUEL_CARDS = ['DKV', 'UTA', 'Shell', 'BP', 'Esso'] as const;
 
@@ -62,6 +66,8 @@ export default function PlannerPage() {
   const [mapEngine, setMapEngine] = useState<MapEngineId>('here');
   const [maxDetourKm, setMaxDetourKm] = useState(8);
   const [minSavingsPerL, setMinSavingsPerL] = useState(0.15);
+  const [tachoSynced, setTachoSynced] = useState(false);
+  const [navFlash, setNavFlash] = useState<string | null>(null);
 
   const [maxHeightM, setMaxHeightM] = useState(4.0);
   const [axleLoadT, setAxleLoadT] = useState(11.5);
@@ -71,6 +77,35 @@ export default function PlannerPage() {
   const [enabledRules, setEnabledRules] = useState<string[]>(() =>
     cardArbitrageRules.filter((r) => r.enabledDefault).map((r) => r.id)
   );
+  const [cmrFlash, setCmrFlash] = useState<string | null>(null);
+
+  const applyCmr = (cmr: CmrShipment) => {
+    const fields = applyCmrToPlannerFields(cmr);
+    setOrigin(fields.origin);
+    setDestination(fields.destination);
+    setEmptyWeightT(fields.emptyWeightT);
+    setLoadedWeightT(fields.loadedWeightT);
+    setAdrCargo(fields.adrCargo);
+    setFreightPriceEur(fields.freightHint);
+    setCalcFlash(true);
+    window.setTimeout(() => setCalcFlash(false), 1200);
+    setCmrFlash(
+      `CMR ${cmr.cmrNumber} toegepast · ${cmr.grossWeightKg.toLocaleString('nl-NL')} kg · ${cmr.goodsDescription}`
+    );
+    window.setTimeout(() => setCmrFlash(null), 4000);
+  };
+
+  useEffect(() => {
+    const existing = getActiveCmr();
+    if (!existing) return;
+    const fields = applyCmrToPlannerFields(existing);
+    setOrigin(fields.origin);
+    setDestination(fields.destination);
+    setEmptyWeightT(fields.emptyWeightT);
+    setLoadedWeightT(fields.loadedWeightT);
+    setAdrCargo(fields.adrCargo);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const cargoWeight = Math.max(0, loadedWeightT - emptyWeightT);
 
@@ -212,8 +247,9 @@ export default function PlannerPage() {
 
   const syncTacho = () => {
     setRemainingDriveMin(84);
+    setTachoSynced(true);
     setTachoFlash(true);
-    window.setTimeout(() => setTachoFlash(false), 1200);
+    window.setTimeout(() => setTachoFlash(false), 2500);
   };
 
   const flashCosts = () => {
@@ -236,16 +272,44 @@ export default function PlannerPage() {
               Planner {'&'} Dispatcher · voertuig, ADR, maut en nettobesparing
             </p>
           </div>
-          <span className="self-start text-xs font-bold px-3 py-1.5 rounded-full bg-sky-500/10 text-[#38bdf8] border border-sky-500/30">
-            Actuele herberekening
-          </span>
+          <button
+            type="button"
+            onClick={() => {
+              runCalc();
+              scrollToId('route-samenvatting');
+            }}
+            className="self-start text-xs font-bold px-4 py-2.5 rounded-[10px] bg-[#00a3ff] text-white border border-[#00a3ff] shadow-[0_0_16px_rgba(0,163,255,0.35)] hover:bg-[#007aff] touch-manipulation"
+          >
+            ↻ Actuele herberekening
+          </button>
         </div>
 
         <RoleGate componentId="live_navigation_maps">
-          <div id="map-engine-sectie">
+          <div id="map-engine-sectie" className="space-y-3">
             <MapEngineSwitcher value={mapEngine} onChange={setMapEngine} />
+            <div className="rounded-2xl overflow-hidden border border-[#1e2a3a]">
+              <RouteMap
+                lat={DEMO_GPS.lat}
+                lng={DEMO_GPS.lng}
+                heightClass="h-[36vh] min-h-[220px] max-h-[420px]"
+                statusLeft={`${mapEngine.toUpperCase()} · OSM-preview`}
+                statusRight={`${origin} → ${destination}`}
+              />
+            </div>
           </div>
         </RoleGate>
+
+        <div id="cmr-import-sectie">
+          <ActiveCmrBanner onOpen={() => scrollToId('cmr-import-sectie')} />
+          <div className="mt-3">
+            <CmrImportPanel onApplied={applyCmr} />
+          </div>
+          {cmrFlash && (
+            <div className="mt-3 rounded-xl border border-[#00a3ff]/40 bg-[#00a3ff]/10 px-4 py-3 text-sm font-semibold text-[#7dd3fc]">
+              {cmrFlash}
+            </div>
+          )}
+        </div>
 
         <RoleGate componentId="financial_margins">
         <ActionBar title="ZZP & Eigenrijder">
@@ -265,6 +329,13 @@ export default function PlannerPage() {
             onClick={() => setShowGlovebox(true)}
           >
             {t('glovebox_open')}
+          </ActionButton>
+          <ActionButton
+            variant="primary"
+            className="w-full py-3"
+            onClick={() => scrollToId('cmr-import-sectie')}
+          >
+            📋 CMR PDF / foto laden
           </ActionButton>
           <ActionButton
             variant="utility"
@@ -795,7 +866,7 @@ export default function PlannerPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div id="route-samenvatting" className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="bg-[#1e293b] p-5 rounded-xl border border-slate-700">
             <span className="text-xs text-[#cbd5e1]">Totale Afstand</span>
             <p className="text-2xl font-black text-[#f8fafc] mt-1">{summary.distanceKm} km</p>
@@ -824,9 +895,23 @@ export default function PlannerPage() {
             tachoFlash ? 'border-emerald-500/60 ring-2 ring-emerald-500/30' : 'border-slate-700'
           }`}
         >
-          <h2 className="text-sm font-bold text-[#f8fafc] uppercase tracking-wider">
-            Live Tachograaf
-          </h2>
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <h2 className="text-sm font-bold text-[#f8fafc] uppercase tracking-wider">
+              Live Tachograaf
+            </h2>
+            <label className="inline-flex items-center gap-2 text-xs font-semibold text-[#c5d0e0] cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={tachoSynced}
+                onChange={(e) => {
+                  if (e.target.checked) syncTacho();
+                  else setTachoSynced(false);
+                }}
+                className="w-5 h-5 rounded border-[#1e2a3a] accent-[#00a3ff]"
+              />
+              Gesynchroniseerd
+            </label>
+          </div>
           <p className="text-lg font-black text-[#38bdf8]">
             Resterende Rijtijd: {formatDriveTime(remainingDriveMin)} tot verplichte 45m rust
           </p>
@@ -834,6 +919,11 @@ export default function PlannerPage() {
             Na de dagelijkse rijtijd geldt 9u verkorte of 11u reguliere dagelijkse rust (EG
             561/2006). Sync reset naar 1u 24m.
           </p>
+          {tachoFlash && (
+            <div className="rounded-[10px] border border-[#28a745]/40 bg-[#28a745]/10 px-3 py-2 text-xs font-bold text-[#86efac]">
+              ✓ Tachograaf gesynchroniseerd · {formatDriveTime(remainingDriveMin)} resterend
+            </div>
+          )}
           <ActionButton variant="primary" className="w-full sm:w-auto py-3" onClick={syncTacho}>
             ⏱ Live Tachograaf Sync
           </ActionButton>
@@ -1067,6 +1157,11 @@ export default function PlannerPage() {
           <div className="px-5 py-4 border-b border-slate-700 flex justify-between items-center">
             <div>
               <h2 className="text-lg font-bold text-[#f8fafc]">Aanbevolen Tankstops</h2>
+              {navFlash && (
+                <div className="mt-2 rounded-[10px] border border-[#28a745]/40 bg-[#28a745]/10 px-3 py-2 text-xs font-bold text-[#86efac]">
+                  {navFlash}
+                </div>
+              )}
               <p className="text-xs text-[#cbd5e1]">
                 Gefilterd op kaarten, omrijdtijd {maxDetourMinutes} min, hoogte ≥ {maxHeightM} m
                 {adrCargo ? ' · alleen ADR-conform' : ''}
@@ -1124,12 +1219,25 @@ export default function PlannerPage() {
                       <td className="px-4 py-3 font-bold text-[#10b981]">
                         € {stop.savingsEur.toFixed(2)}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-3 align-middle min-w-[9.5rem]">
                         <button
                           type="button"
-                          className="h-10 px-4 rounded-lg text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white border-2 border-emerald-400/30"
+                          onClick={() => {
+                            const q = encodeURIComponent(
+                              `${stop.stationName} ${stop.locationHighway}`
+                            );
+                            setNavFlash(`Navigatie gestart → ${stop.stationName}`);
+                            window.setTimeout(() => setNavFlash(null), 3500);
+                            window.open(
+                              `https://www.google.com/maps/dir/?api=1&destination=${q}&travelmode=driving`,
+                              '_blank',
+                              'noopener,noreferrer'
+                            );
+                          }}
+                          className="w-full min-h-[2.75rem] px-2.5 py-2 rounded-[10px] text-[11px] font-bold leading-snug whitespace-normal break-words bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white border border-emerald-400/30 touch-manipulation"
                         >
-                          Start Navigatie naar Autohof
+                          Start navigatie
+                          <span className="block font-semibold opacity-90">naar Autohof</span>
                         </button>
                       </td>
                     </tr>

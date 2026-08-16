@@ -6,15 +6,15 @@ type Variant = 'primary' | 'secondary' | 'utility' | 'slate' | 'danger';
 
 const VARIANT_CLASS: Record<Variant, string> = {
   primary:
-    'bg-emerald-950/40 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-900/40',
+    'bg-[#00a3ff] text-white border border-transparent hover:bg-[#007aff] shadow-md shadow-[0_0_20px_rgba(0,163,255,0.35)]',
   secondary:
-    'bg-indigo-950/40 text-indigo-300 border border-indigo-500/30 hover:bg-indigo-900/40',
+    'bg-transparent text-[#e8eef7] border border-[#00a3ff]/50 hover:bg-[#00a3ff]/10',
   utility:
-    'bg-amber-950/30 text-amber-200/90 border border-amber-500/25 hover:bg-amber-900/30',
+    'bg-[#ff9500]/15 text-[#ffb84d] border border-[#ff9500]/40 hover:bg-[#ff9500]/25',
   slate:
-    'bg-slate-800/80 text-slate-200 border border-slate-700/60 hover:bg-slate-700',
+    'bg-[#151d2a] text-[#c5d0e0] border border-[#1e2a3a] hover:bg-[#1a2433]',
   danger:
-    'bg-rose-950/40 text-rose-300 border border-rose-500/30 hover:bg-rose-900/40',
+    'bg-[#ff3b30] text-white border border-transparent hover:bg-[#e0352b] shadow-md shadow-red-500/25',
 };
 
 export function ActionButton({
@@ -29,7 +29,7 @@ export function ActionButton({
   return (
     <button
       type="button"
-      className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-medium shadow-sm transition disabled:opacity-50 disabled:cursor-not-allowed ${VARIANT_CLASS[variant]} ${className}`}
+      className={`inline-flex items-center justify-center gap-1.5 rounded-[10px] px-3.5 py-2.5 text-xs font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed ${VARIANT_CLASS[variant]} ${className}`}
       {...props}
     >
       {children}
@@ -46,10 +46,8 @@ export function ActionBar({
 }) {
   return (
     <div className="mb-6">
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-2">
-        {title}
-      </p>
-      <div className="flex flex-wrap items-center gap-2.5 [&_button]:!w-auto [&_button]:!h-auto [&_button]:!min-h-0 [&_button]:!py-2 [&_button]:!px-3.5 [&_button]:!text-xs [&_button]:!rounded-lg [&_button]:!shadow-sm">
+      <p className="fr-label mb-2">{title}</p>
+      <div className="flex flex-wrap items-center gap-2.5 [&_button]:!w-auto [&_button]:!h-auto [&_button]:!min-h-0">
         {children}
       </div>
     </div>

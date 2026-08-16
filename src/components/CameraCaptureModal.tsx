@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { useEffect, useId, useRef, useState, type ChangeEvent } from 'react';
 import { ActionButton } from '@/components/ActionBar';
 import {
   assessPhotoQuality,
@@ -59,7 +59,6 @@ function GuideOverlay({ guide }: { guide: CaptureGuide }) {
     );
   }
 
-  // CMR / tankbon rectangle
   return (
     <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 360 640" preserveAspectRatio="xMidYMid slice">
       <rect x="36" y="140" width="288" height="360" rx="8" fill="none" stroke="#34d399" strokeWidth="3" />
@@ -70,6 +69,8 @@ function GuideOverlay({ guide }: { guide: CaptureGuide }) {
     </svg>
   );
 }
+
+type SourceMode = 'pick' | 'camera' | 'file';
 
 export function CameraCaptureModal({
   guide,
@@ -82,11 +83,14 @@ export function CameraCaptureModal({
   onClose: () => void;
   onAccepted: (dataUrl: string, quality: QualityResult) => void;
 }) {
+  const uid = useId();
+  const galleryId = `${uid}-gallery`;
+  const fileId = `${uid}-file`;
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const fileRef = useRef<HTMLInputElement | null>(null);
 
+  const [mode, setMode] = useState<SourceMode>('pick');
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
@@ -97,11 +101,18 @@ export function CameraCaptureModal({
   const copy = GUIDE_COPY[guide];
 
   useEffect(() => {
+    if (mode !== 'camera') {
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+      setCameraReady(false);
+      return;
+    }
+
     let cancelled = false;
 
     async function start() {
       if (!navigator.mediaDevices?.getUserMedia) {
-        setCameraError('Camera niet beschikbaar — gebruik bestandsupload als alternatief.');
+        setCameraError('Camera niet beschikbaar — kies een bestand uit de galerij.');
         return;
       }
       try {
@@ -121,7 +132,7 @@ export function CameraCaptureModal({
           setCameraReady(true);
         }
       } catch {
-        setCameraError('Geen cameratoegang. Kies een foto uit je galerij of geef toestemming.');
+        setCameraError('Geen cameratoegang. Kies een foto uit je galerij.');
       }
     }
 
@@ -132,7 +143,7 @@ export function CameraCaptureModal({
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     };
-  }, []);
+  }, [mode]);
 
   const runValidation = (source: HTMLVideoElement | HTMLImageElement) => {
     const canvas = canvasRef.current;
@@ -164,20 +175,22 @@ export function CameraCaptureModal({
 
   const captureFromCamera = () => {
     const video = videoRef.current;
-    if (!video || !cameraReady) {
-      fileRef.current?.click();
-      return;
-    }
+    if (!video || !cameraReady) return;
     runValidation(video);
   };
 
   const onFile = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setMode('file');
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
       runValidation(img);
+      URL.revokeObjectURL(url);
+    };
+    img.onerror = () => {
+      setCameraError('Bestand kon niet worden gelezen. Probeer JPG of PNG.');
       URL.revokeObjectURL(url);
     };
     img.src = url;
@@ -189,120 +202,155 @@ export function CameraCaptureModal({
     setPreview(null);
     setToast(null);
     setChecking(false);
+    setMode('pick');
   };
 
   return (
     <div className="fixed inset-0 z-[70] bg-black/80 flex items-end md:items-center justify-center p-3 md:p-4">
-      <div className="w-full max-w-lg bg-[#1e293b] border-2 border-slate-600 rounded-2xl overflow-hidden shadow-2xl">
-        <div className="px-4 py-3 border-b border-slate-700 flex justify-between items-start gap-3">
+      <div className="w-full max-w-lg bg-[#0f1620] border border-[#1e2a3a] rounded-2xl overflow-hidden shadow-2xl">
+        <div className="px-4 py-3 border-b border-[#1e2a3a] flex justify-between items-start gap-3">
           <div>
             <h3 className="text-lg font-bold text-[#f8fafc]">{copy.title}</h3>
-            <p className="text-xs text-[#cbd5e1]">{subtitle ?? copy.instruction}</p>
+            <p className="text-xs text-[#9aa8bc]">{subtitle ?? copy.instruction}</p>
           </div>
-          <button type="button" onClick={onClose} className="text-[#cbd5e1] hover:text-white text-sm shrink-0">
+          <button type="button" onClick={onClose} className="text-[#9aa8bc] hover:text-white text-sm shrink-0">
             Sluiten
           </button>
         </div>
 
-        <div className="relative aspect-[3/4] max-h-[58vh] bg-slate-950 overflow-hidden">
-          {!preview && (
-            <>
-              <video
-                ref={videoRef}
-                playsInline
-                muted
-                autoPlay
-                className="absolute inset-0 w-full h-full object-cover"
+        {/* Hidden inputs — géén capture op galerij/bestand (iOS forceert anders camera) */}
+        <input
+          id={galleryId}
+          type="file"
+          accept="image/*"
+          className="absolute w-px h-px opacity-0"
+          style={{ clip: 'rect(0,0,0,0)' }}
+          onChange={onFile}
+        />
+        <input
+          id={fileId}
+          type="file"
+          accept="image/*,.pdf,application/pdf,.jpg,.jpeg,.png"
+          className="absolute w-px h-px opacity-0"
+          style={{ clip: 'rect(0,0,0,0)' }}
+          onChange={onFile}
+        />
+
+        {mode === 'pick' && !preview && (
+          <div className="p-5 space-y-3">
+            <p className="text-sm text-[#c5d0e0] text-center">
+              Kies hoe je het document wilt toevoegen — camera opent alleen als jij dat wilt.
+            </p>
+            <label
+              htmlFor={galleryId}
+              className="flex items-center justify-center gap-2 w-full rounded-[12px] px-4 py-3.5 text-sm font-bold cursor-pointer bg-[#00a3ff] text-white touch-manipulation"
+            >
+              🖼️ Foto uit galerij
+            </label>
+            <label
+              htmlFor={fileId}
+              className="flex items-center justify-center gap-2 w-full rounded-[12px] px-4 py-3.5 text-sm font-bold cursor-pointer border border-[#00a3ff]/50 text-[#e8eef7] touch-manipulation"
+            >
+              📁 Bestand kiezen (JPG / PNG / PDF)
+            </label>
+            <button
+              type="button"
+              onClick={() => setMode('camera')}
+              className="flex items-center justify-center gap-2 w-full rounded-[12px] px-4 py-3.5 text-sm font-bold border border-[#1e2a3a] bg-[#151d2a] text-[#c5d0e0] touch-manipulation"
+            >
+              📷 Live camera
+            </button>
+            {/* Native fallback */}
+            <div className="pt-2">
+              <p className="fr-label mb-1">Werkt de knop niet?</p>
+              <input
+                type="file"
+                accept="image/*,.pdf,application/pdf"
+                onChange={onFile}
+                className="block w-full text-xs text-[#c5d0e0] file:mr-3 file:rounded-[8px] file:border-0 file:bg-[#00a3ff] file:px-3 file:py-2 file:text-xs file:font-semibold file:text-white"
               />
-              {!cameraReady && (
-                <div className="absolute inset-0 flex items-center justify-center bg-slate-950">
-                  <p className="text-sm text-[#cbd5e1] px-6 text-center">
-                    {cameraError ?? 'Camera wordt gestart…'}
-                  </p>
+            </div>
+          </div>
+        )}
+
+        {(mode === 'camera' || preview || checking) && (
+          <div className="relative aspect-[3/4] max-h-[58vh] bg-slate-950 overflow-hidden">
+            {!preview && mode === 'camera' && (
+              <>
+                <video
+                  ref={videoRef}
+                  playsInline
+                  muted
+                  autoPlay
+                  className="absolute inset-0 w-full h-full object-cover"
+                />
+                {!cameraReady && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-slate-950">
+                    <p className="text-sm text-[#cbd5e1] px-6 text-center">
+                      {cameraError ?? 'Camera wordt gestart…'}
+                    </p>
+                  </div>
+                )}
+                <GuideOverlay guide={guide} />
+              </>
+            )}
+
+            {preview && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={preview} alt="Vastgelegde foto" className="absolute inset-0 w-full h-full object-cover" />
+            )}
+
+            {checking && (
+              <div className="absolute inset-0 bg-black/55 flex items-center justify-center">
+                <div className="rounded-2xl bg-[#1e293b] border border-sky-500/40 px-5 py-4 text-center">
+                  <p className="text-sm font-bold text-[#38bdf8] animate-pulse">AI-kwaliteitscontrole…</p>
                 </div>
-              )}
-              <GuideOverlay guide={guide} />
-              <div className="absolute bottom-0 inset-x-0 p-3 bg-gradient-to-t from-black/80 to-transparent">
-                <p className="text-center text-xs md:text-sm font-semibold text-white drop-shadow">
-                  {copy.instruction}
-                </p>
               </div>
-            </>
-          )}
+            )}
 
-          {preview && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={preview} alt="Vastgelegde foto" className="absolute inset-0 w-full h-full object-cover" />
-          )}
-
-          {checking && (
-            <div className="absolute inset-0 bg-black/55 flex items-center justify-center">
-              <div className="rounded-2xl bg-[#1e293b] border border-sky-500/40 px-5 py-4 text-center">
-                <p className="text-sm font-bold text-[#38bdf8] animate-pulse">AI-kwaliteitscontrole…</p>
-                <p className="text-[11px] text-[#cbd5e1] mt-1">Scherpte · Belichting · OCR ≥85%</p>
+            {toast && result?.ok && (
+              <div className="absolute top-3 inset-x-3 rounded-xl bg-emerald-600 border-2 border-emerald-300/40 px-4 py-3 text-center shadow-lg">
+                <p className="text-sm font-bold text-white">✓ AKKOORD — {toast}</p>
               </div>
-            </div>
-          )}
-
-          {toast && result?.ok && (
-            <div className="absolute top-3 inset-x-3 rounded-xl bg-emerald-600 border-2 border-emerald-300/40 px-4 py-3 text-center shadow-lg">
-              <p className="text-sm font-bold text-white">✓ AKKOORD — {toast}</p>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
 
         <canvas ref={canvasRef} className="hidden" />
-        <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onFile} />
 
         {result && !result.ok && (
           <div className="mx-4 mt-3 rounded-xl border-2 border-red-500/50 bg-red-500/15 p-4 space-y-2">
             <p className="text-sm font-black text-red-300">AFGEKEURD</p>
             <p className="text-xs text-[#f8fafc]">{result.tip}</p>
-            <div className="flex flex-wrap gap-2 text-[10px] font-mono text-[#cbd5e1]">
-              <span>Scherpte {result.sharpness}%</span>
-              <span>Licht {result.brightness}%</span>
-              <span>OCR {result.ocrConfidence}% (min. 85%)</span>
-            </div>
           </div>
         )}
 
-        {result?.ok && (
-          <div className="mx-4 mt-3 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-[11px] font-mono text-emerald-300">
-            Scherpte {result.sharpness}% · Licht {result.brightness}% · OCR {result.ocrConfidence}%
+        {mode === 'camera' && !preview && (
+          <div className="p-4 grid grid-cols-2 gap-2">
+            <ActionButton variant="slate" className="w-full" onClick={() => setMode('pick')}>
+              Terug
+            </ActionButton>
+            <ActionButton
+              variant="primary"
+              className="w-full"
+              onClick={captureFromCamera}
+              disabled={!cameraReady || checking}
+            >
+              📷 Vastleggen
+            </ActionButton>
           </div>
         )}
 
-        <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {result && !result.ok ? (
-            <>
-              <ActionButton variant="slate" className="w-full" onClick={onClose}>
-                Annuleren
-              </ActionButton>
-              <ActionButton variant="primary" className="w-full" onClick={retry}>
-                🔄 Opnieuw Proberen
-              </ActionButton>
-            </>
-          ) : (
-            <>
-              <ActionButton
-                variant="secondary"
-                className="w-full"
-                onClick={() => fileRef.current?.click()}
-                disabled={checking || Boolean(result?.ok)}
-              >
-                📁 Galerij / Bestand
-              </ActionButton>
-              <ActionButton
-                variant="primary"
-                className="w-full"
-                onClick={captureFromCamera}
-                disabled={checking || Boolean(result?.ok)}
-              >
-                📷 {copy.captureLabel}
-              </ActionButton>
-            </>
-          )}
-        </div>
+        {result && !result.ok && (
+          <div className="p-4 grid grid-cols-2 gap-2">
+            <ActionButton variant="slate" className="w-full" onClick={onClose}>
+              Annuleren
+            </ActionButton>
+            <ActionButton variant="primary" className="w-full" onClick={retry}>
+              🔄 Opnieuw
+            </ActionButton>
+          </div>
+        )}
       </div>
     </div>
   );

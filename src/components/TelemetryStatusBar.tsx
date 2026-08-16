@@ -1,7 +1,7 @@
 'use client';
 
-import { useTelemetry } from '@/components/TelemetryProvider';
 import { useLanguage } from '@/components/LanguageProvider';
+import { useTelemetry } from '@/components/TelemetryProvider';
 
 export function TelemetryStatusBar({
   fuelPct: fuelOverride,
@@ -30,16 +30,19 @@ export function TelemetryStatusBar({
       label: t('telem_fuel'),
       value: `${fuelPct.toFixed(0)}%`,
       warn: fuelPct < 20,
+      bar: fuelPct,
     },
     {
       label: t('telem_adblue'),
       value: `${adBluePct.toFixed(0)}%`,
       warn: adBluePct < 15,
+      bar: adBluePct,
     },
     {
       label: t('telem_battery'),
       value: `${batteryV.toFixed(1)} V`,
       warn: batteryV < 23.5,
+      bar: Math.min(100, ((batteryV - 22) / 3) * 100),
     },
     {
       label: t('telem_tires'),
@@ -54,13 +57,12 @@ export function TelemetryStatusBar({
   ];
 
   return (
-    <div className="rounded-xl border border-slate-700/60 bg-slate-900/70 px-3 py-2.5">
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-          {t('telem_live')}
-        </p>
+    <div className="fr-panel px-3 py-3">
+      <div className="flex items-center justify-between mb-3">
+        <p className="fr-label">{t('telem_live')}</p>
         {tel.animating && (
-          <span className="text-[10px] font-bold text-amber-300 animate-pulse">
+          <span className="fr-chip text-[#7dd3fc] border-[#00a3ff]/40 bg-[#00a3ff]/10">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#28a745] animate-pulse" />
             {Math.round(tel.displaySpeedKmh)} km/h · {tel.engineRpm} rpm
           </span>
         )}
@@ -69,20 +71,30 @@ export function TelemetryStatusBar({
         {items.map((item) => (
           <div
             key={item.label}
-            className={`rounded-lg border px-2.5 py-2 transition-colors duration-500 ${
+            className={`rounded-[10px] border px-2.5 py-2.5 transition-colors duration-500 ${
               item.warn
-                ? 'bg-amber-950/30 border-amber-500/30'
-                : 'bg-slate-800/50 border-slate-700/50'
+                ? 'bg-[#ff3b30]/10 border-[#ff3b30]/35'
+                : 'bg-[#050a0f] border-[#1e2a3a]'
             }`}
           >
-            <p className="text-[10px] text-slate-400">{item.label}</p>
+            <p className="fr-label">{item.label}</p>
             <p
-              className={`text-xs font-semibold mt-0.5 tabular-nums transition-all duration-500 ${
-                item.warn ? 'text-amber-200' : 'text-slate-100'
+              className={`text-sm font-bold mt-0.5 tabular-nums tracking-tight ${
+                item.warn ? 'text-[#ff8a82]' : 'text-[#f2f6fb]'
               }`}
             >
               {item.value}
             </p>
+            {'bar' in item && item.bar != null && (
+              <div className="mt-2 h-1 rounded-full bg-[#1e2a3a] overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${
+                    item.warn ? 'bg-[#ff3b30]' : 'bg-[#00a3ff]'
+                  }`}
+                  style={{ width: `${Math.max(0, Math.min(100, item.bar))}%` }}
+                />
+              </div>
+            )}
           </div>
         ))}
       </div>

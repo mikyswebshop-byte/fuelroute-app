@@ -9,6 +9,10 @@ export type VoiceCommandId =
   | 'simuleer'
   | 'handschoenvak'
   | 'cmr'
+  | 'cmr_foto'
+  | 'nieuwe_route'
+  | 'navigatie'
+  | 'eta'
   | 'rijtijd'
   | 'berichten'
   | 'pech'
@@ -27,7 +31,7 @@ type SpeechRecognitionLike = {
 };
 
 const DEFAULT_HINT =
-  "Zeg: 'Status', 'Tanken', 'Stilstand', 'Simuleer', of 'Handschoenvak'";
+  "Zeg: Status, Tanken, Nieuwe route, CMR foto, Bon, Stilstand, Navigatie…";
 
 function getRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
   if (typeof window === 'undefined') return null;
@@ -50,8 +54,33 @@ export function speakText(text: string, lang = 'nl-NL') {
 export function matchVoiceCommand(transcript: string): VoiceCommandId {
   const t = transcript.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
 
+  if (
+    t.includes('nieuwe route') ||
+    t.includes('andere route') ||
+    t.includes('route wijzigen') ||
+    t.includes('herplan')
+  ) {
+    return 'nieuwe_route';
+  }
+  if (
+    t.includes('cmr foto') ||
+    t.includes('fotografeer cmr') ||
+    t.includes('bon foto') ||
+    t.includes('bon scannen') ||
+    t.includes('tankbon') ||
+    t.includes('fotografeer bon') ||
+    (t.includes('bon') && (t.includes('foto') || t.includes('scan') || t.includes('maak')))
+  ) {
+    return 'cmr_foto';
+  }
+  if (t.includes('navigatie') || t.includes('navigeer') || t.includes('volgende afslag')) {
+    return 'navigatie';
+  }
+  if (t.includes('eta') || t.includes('aankomst') || t.includes('hoe laat')) return 'eta';
   if (t.includes('handschoen') || t.includes('document')) return 'handschoenvak';
-  if (t.includes('cmr') || t.includes('handteken') || t.includes('signature')) return 'cmr';
+  if (t.includes('cmr') || t.includes('handteken') || t.includes('vrachtbrief') || t.includes('signature')) {
+    return 'cmr';
+  }
   if (
     t.includes('simuleer') ||
     t.includes('start rit') ||
@@ -60,7 +89,7 @@ export function matchVoiceCommand(transcript: string): VoiceCommandId {
   ) {
     return 'simuleer';
   }
-  if (t.includes('stilstand') || t.includes('pauze') || t.includes('parkeren') || t.includes('stop')) {
+  if (t.includes('stilstand') || t.includes('pauze') || t.includes('parkeren') || t.includes('stop rit')) {
     return 'stilstand';
   }
   if (
@@ -86,6 +115,24 @@ export function matchVoiceCommand(transcript: string): VoiceCommandId {
   return 'unknown';
 }
 
+export type VoiceResponses = {
+  status: string;
+  tanken: string;
+  stilstand: string;
+  simuleer: string;
+  handschoenvak: string;
+  cmr: string;
+  cmr_foto: string;
+  nieuwe_route: string;
+  navigatie: string;
+  eta: string;
+  rijtijd: string;
+  berichten: string;
+  pech: string;
+  unknown: string;
+  listening: string;
+};
+
 export function VoiceAssistant({
   speechLang = 'nl-NL',
   responses,
@@ -96,19 +143,7 @@ export function VoiceAssistant({
   hint = DEFAULT_HINT,
 }: {
   speechLang?: string;
-  responses: {
-    status: string;
-    tanken: string;
-    stilstand: string;
-    simuleer: string;
-    handschoenvak: string;
-    cmr: string;
-    rijtijd: string;
-    berichten: string;
-    pech: string;
-    unknown: string;
-    listening: string;
-  };
+  responses: VoiceResponses;
   onCommand?: (cmd: Exclude<VoiceCommandId, 'unknown'>) => void;
   onEmergency?: () => void;
   large?: boolean;
@@ -181,73 +216,53 @@ export function VoiceAssistant({
     }
 
     try {
-      recRef.current?.abort();
-    } catch {
-      /* ignore */
-    }
-
-    const rec = new Ctor();
-    rec.lang = speechLang;
-    rec.continuous = false;
-    rec.interimResults = false;
-    rec.onresult = (ev) => {
-      const transcript = ev.results?.[0]?.[0]?.transcript ?? '';
-      setLastHeard(transcript);
-      handleCommand(matchVoiceCommand(transcript));
-      setListening(false);
-    };
-    rec.onerror = () => {
-      setListening(false);
-      setStatus(responsesRef.current.unknown);
-    };
-    rec.onend = () => setListening(false);
-    recRef.current = rec;
-    setListening(true);
-    setStatus(responsesRef.current.listening);
-    try {
+      const rec = new Ctor();
+      rec.lang = speechLang;
+      rec.continuous = false;
+      rec.interimResults = false;
+      rec.onresult = (ev) => {
+        const transcript = ev.results?.[0]?.[0]?.transcript ?? '';
+        setLastHeard(transcript);
+        setShowHint(false);
+        handleCommand(matchVoiceCommand(transcript));
+      };
+      rec.onerror = () => {
+        setListening(false);
+        setShowHint(false);
+      };
+      rec.onend = () => {
+        setListening(false);
+        setShowHint(false);
+      };
+      recRef.current = rec;
       rec.start();
+      setListening(true);
+      window.setTimeout(() => setShowHint(false), 4000);
     } catch {
-      setListening(false);
+      setSupported(false);
     }
   }, [handleCommand, speechLang]);
 
-  useEffect(
-    () => () => {
-      try {
-        recRef.current?.abort();
-      } catch {
-        /* ignore */
-      }
-    },
-    []
-  );
-
-  useEffect(() => {
-    if (!showHint) return;
-    const id = window.setTimeout(() => setShowHint(false), 6000);
-    return () => window.clearTimeout(id);
-  }, [showHint, listening]);
-
   return (
-    <div className={`flex flex-col items-center gap-2 ${className}`}>
+    <div className={`flex flex-col items-center gap-1.5 ${className}`}>
       <button
         type="button"
         onClick={() => (listening ? stopListening() : startListening())}
         aria-pressed={listening}
         aria-label="Voice assistant"
-        className={`rounded-full border-2 shadow-2xl transition flex items-center justify-center ${
-          large ? 'w-28 h-28 text-4xl' : 'w-16 h-16 text-2xl'
+        className={`rounded-full border-2 transition flex items-center justify-center ${
+          large ? 'w-[72px] h-[72px] text-3xl' : 'w-14 h-14 text-xl'
         } ${
           listening
-            ? 'bg-rose-600 border-rose-300 text-white animate-pulse'
-            : 'bg-sky-600 border-sky-300 text-white hover:bg-sky-500'
+            ? 'bg-[#00a3ff] border-white/40 text-white fr-mic-active'
+            : 'bg-[#00a3ff] border-[#00a3ff] text-white shadow-[0_0_28px_rgba(0,163,255,0.45)] hover:bg-[#007aff]'
         }`}
       >
         🎤
       </button>
       <p
-        className={`font-bold ${large ? 'text-base' : 'text-xs'} ${
-          listening ? 'text-rose-300' : 'text-slate-300'
+        className={`font-semibold ${large ? 'text-xs' : 'text-[10px]'} ${
+          listening ? 'text-[#00a3ff]' : 'text-[#6b7a90]'
         }`}
       >
         {listening ? responses.listening : supported ? 'Voice AI' : 'TTS only'}
@@ -255,9 +270,9 @@ export function VoiceAssistant({
 
       {showHint && (
         <div
-          className={`rounded-xl border border-sky-500/40 bg-sky-950/80 px-3 py-2 text-center shadow-lg ${
-            large ? 'text-sm max-w-sm' : 'text-[11px] max-w-xs'
-          } text-sky-100`}
+          className={`rounded-[12px] border border-[#00a3ff]/40 bg-[#0f1620]/95 px-3 py-2 text-center shadow-lg ${
+            large ? 'text-xs max-w-[240px]' : 'text-[10px] max-w-[180px]'
+          } text-[#c5e8ff]`}
         >
           🎤 {hint}
         </div>
@@ -265,11 +280,11 @@ export function VoiceAssistant({
 
       {(status || lastHeard) && !showHint && (
         <div
-          className={`rounded-xl border border-slate-600 bg-slate-950/70 px-3 py-2 text-center ${
-            large ? 'text-sm max-w-sm' : 'text-[11px] max-w-xs'
-          } text-slate-200`}
+          className={`rounded-[12px] border border-[#1e2a3a] bg-[#0f1620]/95 px-3 py-2 text-center ${
+            large ? 'text-xs max-w-[240px]' : 'text-[10px] max-w-[180px]'
+          } text-[#c5d0e0]`}
         >
-          {lastHeard && <p className="text-slate-500 mb-1 truncate">“{lastHeard}”</p>}
+          {lastHeard && <p className="text-[#6b7a90] mb-1 truncate">“{lastHeard}”</p>}
           {status && <p className="font-semibold">{status}</p>}
         </div>
       )}

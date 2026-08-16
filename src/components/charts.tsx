@@ -104,56 +104,82 @@ export function PriceLineChart({ data }: { data: LinePoint[] }) {
 
 export function FuelGauge({ level }: { level: number }) {
   const clamped = Math.max(0, Math.min(100, level));
-  const radius = 70;
-  const stroke = 12;
-  const c = 2 * Math.PI * radius;
-  const offset = c - (clamped / 100) * c;
-  const color = clamped < 25 ? '#f59e0b' : clamped < 40 ? '#fbbf24' : '#10b981';
-  // Needle on semicircle: 0% = -90deg (left), 100% = 90deg (right) in unrotated view
-  const needleAngle = -90 + (clamped / 100) * 180;
+  const r = 64;
+  const c = Math.PI * r;
+  const progress = clamped / 100;
+  const dash = c * progress;
+  const color = clamped < 20 ? '#ff3b30' : clamped < 40 ? '#ff9500' : '#28a745';
+  const needleAngle = -90 + progress * 180;
 
   return (
-    <div className="relative w-44 h-44 mx-auto">
-      <svg viewBox="0 0 180 180" className="w-full h-full">
-        <g transform="rotate(-90 90 90)">
-          <circle cx="90" cy="90" r={radius} fill="none" stroke="#1e293b" strokeWidth={stroke} />
-          <circle
-            cx="90"
-            cy="90"
-            r={radius}
-            fill="none"
-            stroke={color}
-            strokeWidth={stroke}
-            strokeLinecap="round"
-            strokeDasharray={c}
-            strokeDashoffset={offset}
-            style={{ transition: 'stroke-dashoffset 0.6s ease-out, stroke 0.4s ease' }}
-          />
-        </g>
+    <div className="relative w-44 h-40 mx-auto select-none">
+      <svg viewBox="0 0 180 150" className="w-full h-full overflow-visible">
+        <defs>
+          <filter id="fuelGlow" x="-40%" y="-40%" width="180%" height="180%">
+            <feGaussianBlur stdDeviation="2.5" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
+        <path
+          d="M 26 120 A 64 64 0 0 1 154 120"
+          fill="none"
+          stroke="#1e2a3a"
+          strokeWidth="11"
+          strokeLinecap="round"
+        />
+        {/* Low-fuel zone track hint */}
+        <path
+          d="M 26 120 A 64 64 0 0 1 58 72"
+          fill="none"
+          stroke="#ff9500"
+          strokeWidth="11"
+          strokeLinecap="round"
+          opacity="0.35"
+        />
+        <path
+          d="M 26 120 A 64 64 0 0 1 154 120"
+          fill="none"
+          stroke={color}
+          strokeWidth="11"
+          strokeLinecap="round"
+          strokeDasharray={`${dash} ${c}`}
+          filter="url(#fuelGlow)"
+          style={{ transition: 'stroke-dasharray 0.5s ease-out, stroke 0.4s ease' }}
+        />
+        <text x="28" y="138" fill="#6b7a90" fontSize="11" fontWeight="700">
+          E
+        </text>
+        <text x="148" y="138" fill="#6b7a90" fontSize="11" fontWeight="700">
+          F
+        </text>
         <g
           style={{
             transform: `rotate(${needleAngle}deg)`,
-            transformOrigin: '90px 90px',
+            transformOrigin: '90px 120px',
             transition: 'transform 0.45s ease-out',
           }}
         >
           <line
             x1="90"
-            y1="90"
+            y1="120"
             x2="90"
-            y2="28"
-            stroke="#f8fafc"
+            y2="62"
+            stroke={color}
             strokeWidth="2.5"
             strokeLinecap="round"
+            style={{ filter: `drop-shadow(0 0 6px ${color})` }}
           />
         </g>
-        <circle cx="90" cy="90" r="6" fill="#38bdf8" />
+        <circle cx="90" cy="120" r="5" fill={color} />
       </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-        <span className="text-3xl font-black text-[#f8fafc] tabular-nums transition-all duration-500">
-          {clamped.toFixed(1)}%
+      <div className="absolute inset-x-0 top-[42%] flex flex-col items-center pointer-events-none">
+        <span className="fr-display text-2xl tabular-nums leading-none">
+          {clamped.toFixed(0)}%
         </span>
-        <span className="text-xs text-[#cbd5e1]">Brandstofniveau</span>
+        <span className="fr-label mt-1">Brandstof</span>
       </div>
     </div>
   );

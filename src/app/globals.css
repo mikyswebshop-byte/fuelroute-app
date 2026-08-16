@@ -1,28 +1,112 @@
 @import "tailwindcss";
 
 :root {
-  --background: #0b0f19;
-  --foreground: #cbd5e1;
-  --panel: #1e293b;
-  --heading: #f8fafc;
-  --accent: #38bdf8;
-  --success: #10b981;
+  /* FuelRoute Design Kit v2 — Next-gen Dark Fleet OS */
+  --fr-bg: #050a0f;
+  --fr-bg-elevated: #0b0e11;
+  --fr-surface: #0f1620;
+  --fr-surface-2: #151d2a;
+  --fr-surface-glass: rgba(15, 22, 32, 0.72);
+  --fr-border: #1e2a3a;
+  --fr-border-strong: #2a3a50;
+  --fr-text: #f2f6fb;
+  --fr-text-muted: #9aa8bc;
+  --fr-text-dim: #6b7a90;
+  --fr-accent: #00a3ff;
+  --fr-accent-soft: #007aff;
+  --fr-accent-glow: rgba(0, 163, 255, 0.4);
+  --fr-sky: #00a3ff;
+  --fr-success: #28a745;
+  --fr-success-soft: rgba(40, 167, 69, 0.16);
+  --fr-warning: #ff9500;
+  --fr-warning-soft: rgba(255, 149, 0, 0.16);
+  --fr-danger: #ff3b30;
+  --fr-danger-soft: rgba(255, 59, 48, 0.16);
+  --fr-radius: 12px;
+  --fr-radius-sm: 8px;
+  --fr-radius-lg: 16px;
+
+  --background: var(--fr-bg);
+  --foreground: var(--fr-text-muted);
+  --panel: var(--fr-surface);
+  --heading: var(--fr-text);
+  --accent: var(--fr-accent);
+  --success: var(--fr-success);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-sora), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, monospace;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--fr-bg);
+  color: var(--fr-text-muted);
+  font-family: var(--font-sans);
 }
 
-/* Interactive range sliders */
+.fr-display {
+  font-family: var(--font-sans);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--fr-text);
+}
+
+.fr-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.fr-panel {
+  background: var(--fr-surface);
+  border: 1px solid var(--fr-border);
+  border-radius: var(--fr-radius);
+}
+
+.fr-glass {
+  background: var(--fr-surface-glass);
+  border: 1px solid color-mix(in srgb, var(--fr-border-strong) 80%, transparent);
+  border-radius: var(--fr-radius-lg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.fr-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 10px;
+  border: 1px solid var(--fr-border);
+  background: var(--fr-bg-elevated);
+  padding: 0.35rem 0.7rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--fr-text);
+}
+
+.fr-label {
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fr-text-dim);
+}
+
+.fr-btn-primary {
+  background: var(--fr-accent);
+  color: #fff;
+  border-radius: var(--fr-radius-sm);
+  font-weight: 600;
+  box-shadow: 0 0 20px var(--fr-accent-glow);
+}
+
+.fr-glow-ring {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--fr-accent) 45%, transparent),
+    0 0 28px var(--fr-accent-glow);
+}
+
 .fr-range {
   -webkit-appearance: none;
   appearance: none;
@@ -31,8 +115,8 @@ body {
   border-radius: 9999px;
   background: linear-gradient(
     to right,
-    var(--fr-accent, #38bdf8) 0%,
-    var(--fr-accent, #38bdf8) var(--fr-pct, 0%),
+    var(--fr-accent) 0%,
+    var(--fr-accent) var(--fr-pct, 0%),
     #0f172a var(--fr-pct, 0%),
     #0f172a 100%
   );
@@ -47,15 +131,9 @@ body {
   height: 1.25rem;
   border-radius: 9999px;
   background: #f8fafc;
-  border: 2px solid var(--fr-accent, #38bdf8);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fr-accent, #38bdf8) 28%, transparent);
+  border: 2px solid var(--fr-accent);
+  box-shadow: 0 0 0 3px var(--fr-accent-glow);
   cursor: grab;
-  transition: transform 0.12s ease;
-}
-
-.fr-range:active::-webkit-slider-thumb {
-  cursor: grabbing;
-  transform: scale(1.08);
 }
 
 .fr-range::-moz-range-thumb {
@@ -63,8 +141,7 @@ body {
   height: 1.25rem;
   border-radius: 9999px;
   background: #f8fafc;
-  border: 2px solid var(--fr-accent, #38bdf8);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fr-accent, #38bdf8) 28%, transparent);
+  border: 2px solid var(--fr-accent);
   cursor: grab;
 }
 
@@ -76,10 +153,10 @@ body {
 
 @keyframes field-glow-pulse {
   0% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, #38bdf8 55%, transparent);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--fr-accent) 55%, transparent);
   }
   40% {
-    box-shadow: 0 0 0 6px color-mix(in srgb, #38bdf8 35%, transparent);
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--fr-accent) 30%, transparent);
   }
   100% {
     box-shadow: 0 0 0 0 transparent;
@@ -88,10 +165,40 @@ body {
 
 .field-glow {
   animation: field-glow-pulse 1.4s ease-out;
-  border-color: #38bdf8 !important;
+  border-color: var(--fr-accent) !important;
 }
 
-/* Hide Next.js dev overlay badge on mobile so it does not block bottom UI */
+@keyframes fr-mic-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(0, 163, 255, 0.55);
+  }
+  50% {
+    box-shadow: 0 0 0 16px rgba(0, 163, 255, 0);
+  }
+}
+
+.fr-mic-active {
+  animation: fr-mic-pulse 1.35s ease-out infinite;
+}
+
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+  background: #0b0e11;
+  font: inherit;
+}
+
+.leaflet-control-attribution {
+  background: rgba(11, 14, 17, 0.75) !important;
+  color: #6b7a90 !important;
+  font-size: 10px !important;
+}
+
+.leaflet-control-attribution a {
+  color: #00a3ff !important;
+}
+
 @media (max-width: 768px) {
   nextjs-portal {
     display: none !important;

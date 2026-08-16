@@ -2,6 +2,7 @@
 
 import { useId, useRef, useState, type ChangeEvent } from 'react';
 import { ActionButton } from '@/components/ActionBar';
+import { useUi } from '@/components/useUi';
 import {
   parseCmrFromFile,
   setActiveCmr,
@@ -14,13 +15,14 @@ export function CmrImportPanel({
   onApplied,
   compact = false,
 }: {
-  /** Called after CMR is saved as active (planner can fill form fields). */
   onApplied?: (cmr: CmrShipment) => void;
   compact?: boolean;
 }) {
+  const ui = useUi();
   const uid = useId();
   const fileInputId = `${uid}-file`;
   const photoInputId = `${uid}-photo`;
+  const fallbackInputId = `${uid}-fallback`;
   const fileRef = useRef<HTMLInputElement>(null);
   const photoRef = useRef<HTMLInputElement>(null);
 
@@ -37,33 +39,29 @@ export function CmrImportPanel({
     setDraft(cmr);
     setFlash(
       fromOcr
-        ? `Toegepast op rit · ${cmr.cmrNumber} · ${cmr.origin} → ${cmr.destination}`
-        : `Actieve CMR · ${cmr.cmrNumber} · route & gewichten geladen`
+        ? `${ui('cmr_applied_trip')} · ${cmr.cmrNumber} · ${cmr.origin} → ${cmr.destination}`
+        : `${ui('cmr_active_applied')} · ${cmr.cmrNumber}`
     );
     onApplied?.(cmr);
   };
 
   const runFile = (file: File | undefined | null) => {
     if (!file) {
-      setPickerError('Geen bestand ontvangen. Probeer opnieuw of een ander formaat (JPG/PNG/PDF).');
+      setPickerError('—');
       return;
     }
     const ok =
       ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg', ''].includes(file.type) ||
       /\.(pdf|jpe?g|png)$/i.test(file.name);
-    // iOS sometimes sends empty MIME — still allow by extension / any image*
     const okMime =
-      ok ||
-      file.type.startsWith('image/') ||
-      file.type === 'application/pdf';
+      ok || file.type.startsWith('image/') || file.type === 'application/pdf';
     if (!okMime && file.size === 0) {
-      setPickerError('Bestand is leeg of niet leesbaar.');
+      setPickerError('—');
       return;
     }
     if (!okMime && !/\./.test(file.name)) {
-      // iOS camera files sometimes lack extension — still accept images
       if (!file.type.startsWith('image/') && file.type !== 'application/pdf') {
-        setPickerError('Alleen PDF, JPG of PNG.');
+        setPickerError('PDF / JPG / PNG');
         return;
       }
     }
@@ -80,15 +78,13 @@ export function CmrImportPanel({
         apply(parsed, true);
       } catch {
         setScanning(false);
-        setPickerError('Kon dit bestand niet verwerken. Probeer JPG of PDF.');
+        setPickerError('PDF / JPG');
       }
     }, 700);
   };
 
   const onInputChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    runFile(f);
-    // reset so same file can be re-selected
+    runFile(e.target.files?.[0]);
     e.target.value = '';
   };
 
@@ -98,22 +94,19 @@ export function CmrImportPanel({
   return (
     <div className={`space-y-3 ${compact ? '' : 'fr-glass p-4 sm:p-5'}`}>
       <div>
-        <p className="fr-label">CMR / e-CMR import</p>
-        <h3 className="fr-display text-base sm:text-lg mt-0.5">Vrachtbrief uit bestand</h3>
+        <p className="fr-label">{ui('cmr_import_title')}</p>
+        <h3 className="fr-display text-base sm:text-lg mt-0.5">{ui('cmr_from_file')}</h3>
         <p className="text-xs text-[var(--fr-text-muted)] mt-1 leading-relaxed">
-          Kies een bestand of foto. Na OCR wordt de CMR <span className="text-[#e8eef7] font-semibold">direct
-          toegepast</span> op de rit.
+          {ui('cmr_ocr_hint')}
         </p>
       </div>
 
-      {/* Twee aparte inputs: iOS Safari faalt vaak als capture op dezelfde input zit als “bestand” */}
       <input
         id={fileInputId}
         ref={fileRef}
         type="file"
         accept="image/*,.pdf,application/pdf,.jpg,.jpeg,.png"
-        className="absolute w-px h-px p-0 -m-px overflow-hidden whitespace-nowrap border-0 opacity-0"
-        style={{ clip: 'rect(0, 0, 0, 0)' }}
+        className="sr-only"
         onChange={onInputChange}
       />
       <input
@@ -121,8 +114,14 @@ export function CmrImportPanel({
         ref={photoRef}
         type="file"
         accept="image/*"
-        className="absolute w-px h-px p-0 -m-px overflow-hidden whitespace-nowrap border-0 opacity-0"
-        style={{ clip: 'rect(0, 0, 0, 0)' }}
+        className="sr-only"
+        onChange={onInputChange}
+      />
+      <input
+        id={fallbackInputId}
+        type="file"
+        accept="image/*,.pdf,application/pdf,.jpg,.jpeg,.png"
+        className="sr-only"
         onChange={onInputChange}
       />
 
@@ -144,35 +143,33 @@ export function CmrImportPanel({
         }`}
       >
         <p className="text-sm font-semibold text-[#e8eef7]">
-          {scanning ? 'OCR bezig… wordt meteen toegepast' : 'Sleep CMR hierheen of kies hieronder'}
+          {scanning ? 'OCR…' : ui('cmr_drag')}
         </p>
-        <p className="text-[11px] text-[#6b7a90] mt-1">PDF · JPG · PNG · werkt op telefoon & PC</p>
+        <p className="text-[11px] text-[#6b7a90] mt-1">{ui('cmr_formats')}</p>
 
         <div className="mt-4 flex flex-col sm:flex-row flex-wrap justify-center gap-2">
-          {/* label htmlFor = betrouwbaarder dan input.click() op iOS */}
           <label
             htmlFor={fileInputId}
             className="inline-flex items-center justify-center gap-1.5 rounded-[10px] px-4 py-3 text-xs font-semibold cursor-pointer bg-[#00a3ff] text-white shadow-[0_0_20px_rgba(0,163,255,0.35)] hover:bg-[#007aff] touch-manipulation"
           >
-            📄 Bestand kiezen
+            📄 {ui('cmr_choose_file')}
           </label>
           <label
             htmlFor={photoInputId}
             className="inline-flex items-center justify-center gap-1.5 rounded-[10px] px-4 py-3 text-xs font-semibold cursor-pointer bg-transparent text-[#e8eef7] border border-[#00a3ff]/50 hover:bg-[#00a3ff]/10 touch-manipulation"
           >
-            📷 Foto / galerij
+            📷 {ui('cmr_photo_gallery')}
           </label>
         </div>
 
-        {/* Zichtbare native picker — altijd als fallback (iOS/Android/PC) */}
         <div className="mt-4 text-left space-y-1.5">
-          <p className="fr-label text-center sm:text-left">Werkt de knop niet? Gebruik deze kiezer:</p>
-          <input
-            type="file"
-            accept="image/*,.pdf,application/pdf,.jpg,.jpeg,.png"
-            onChange={onInputChange}
-            className="block w-full text-xs text-[#c5d0e0] file:mr-3 file:rounded-[8px] file:border-0 file:bg-[#00a3ff] file:px-3 file:py-2 file:text-xs file:font-semibold file:text-white"
-          />
+          <p className="fr-label text-center sm:text-left">{ui('cmr_fallback')}</p>
+          <label
+            htmlFor={fallbackInputId}
+            className="inline-flex w-full sm:w-auto items-center justify-center rounded-[8px] bg-[#00a3ff] px-3 py-2 text-xs font-semibold text-white cursor-pointer touch-manipulation"
+          >
+            {ui('choose_file_native')}
+          </label>
         </div>
       </div>
 
@@ -202,14 +199,14 @@ export function CmrImportPanel({
           onClear={() => {
             setDraft(null);
             setActiveCmr(null);
-            setFlash('Actieve CMR gewist');
+            setFlash(ui('cmr_clear'));
           }}
         />
       )}
 
       {history.length > 0 && (
         <div className="space-y-2">
-          <p className="fr-label">Recente CMR’s</p>
+          <p className="fr-label">{ui('cmr_history')}</p>
           <ul className="space-y-1.5">
             {history.slice(0, 5).map((h) => (
               <li key={h.id}>
@@ -243,6 +240,7 @@ function CmrDetails({
   onApply: () => void;
   onClear: () => void;
 }) {
+  const ui = useUi();
   return (
     <div
       className={`rounded-[12px] border p-3.5 space-y-3 ${
@@ -252,15 +250,15 @@ function CmrDetails({
       <div className="flex flex-wrap gap-2">
         {isApplied ? (
           <span className="inline-flex items-center rounded-[10px] bg-[#28a745]/20 border border-[#28a745]/40 px-3 py-2 text-xs font-bold text-[#86efac]">
-            ✓ Toegepast op rit
+            ✓ {ui('cmr_applied_trip')}
           </span>
         ) : (
           <ActionButton variant="primary" className="flex-1 min-w-[160px]" onClick={onApply}>
-            ✓ Nu toepassen op rit
+            ✓ {ui('cmr_applied_trip')}
           </ActionButton>
         )}
         <ActionButton variant="slate" onClick={onClear}>
-          Wissen
+          {ui('cmr_clear')}
         </ActionButton>
       </div>
 
@@ -274,20 +272,16 @@ function CmrDetails({
         )}
       </div>
       <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-xs">
-        <Field label="Afzender" value={cmr.shipper} />
-        <Field label="Ontvanger" value={cmr.consignee} />
-        <Field label="Van" value={cmr.origin} />
-        <Field label="Naar" value={cmr.destination} />
-        <Field label="Goederen" value={cmr.goodsDescription} />
-        <Field label="Colli" value={String(cmr.packages)} />
-        <Field
-          label="Brutogewicht"
-          value={`${cmr.grossWeightKg.toLocaleString('nl-NL')} kg`}
-          mono
-        />
-        <Field label="Beladen" value={`${cmr.loadedWeightT} t`} mono />
-        <Field label="Trekker" value={cmr.truckPlate} mono />
-        <Field label="Oplegger" value={cmr.trailerPlate} mono />
+        <Field label={ui('cmr_shipper')} value={cmr.shipper} />
+        <Field label={ui('cmr_consignee')} value={cmr.consignee} />
+        <Field label={ui('origin')} value={cmr.origin} />
+        <Field label={ui('destination')} value={cmr.destination} />
+        <Field label={ui('cmr_goods')} value={cmr.goodsDescription} />
+        <Field label={ui('cmr_packages')} value={String(cmr.packages)} />
+        <Field label={ui('cmr_weight_kg')} value={`${cmr.grossWeightKg.toLocaleString()} kg`} mono />
+        <Field label={ui('cmr_weight_t')} value={`${cmr.loadedWeightT} t`} mono />
+        <Field label={ui('cmr_truck')} value={cmr.truckPlate} mono />
+        <Field label={ui('cmr_trailer')} value={cmr.trailerPlate} mono />
       </dl>
       <p className="text-[11px] text-[#6b7a90]">
         {cmr.notes} · {cmr.fileName}
@@ -313,9 +307,9 @@ function Field({
   );
 }
 
-/** Compact banner when a CMR is active (cockpit / planner). */
 export function ActiveCmrBanner({ onOpen }: { onOpen?: () => void }) {
   const cmr = useActiveCmr();
+  const ui = useUi();
   if (!cmr) return null;
   return (
     <button
@@ -324,18 +318,18 @@ export function ActiveCmrBanner({ onOpen }: { onOpen?: () => void }) {
       className="w-full text-left fr-glass px-3 py-2.5 flex items-center justify-between gap-2 hover:border-[#00a3ff]/40"
     >
       <div className="min-w-0">
-        <p className="fr-label">Actieve CMR · toegepast</p>
+        <p className="fr-label">{ui('cmr_active_applied')}</p>
         <p className="text-sm font-bold text-[#f2f6fb] truncate">
           <span className="fr-mono text-[#00a3ff]">{cmr.cmrNumber}</span>
           {' · '}
           {cmr.origin} → {cmr.destination}
         </p>
         <p className="text-[11px] text-[#9aa8bc] fr-mono mt-0.5">
-          {cmr.loadedWeightT} t · {cmr.grossWeightKg.toLocaleString('nl-NL')} kg
+          {cmr.loadedWeightT} t · {cmr.grossWeightKg.toLocaleString()} kg
           {cmr.adr ? ` · ADR ${cmr.adrClass}` : ''}
         </p>
       </div>
-      <span className="text-[#00a3ff] text-xs font-bold shrink-0">Open</span>
+      <span className="text-[#00a3ff] text-xs font-bold shrink-0">{ui('cmr_open')}</span>
     </button>
   );
 }

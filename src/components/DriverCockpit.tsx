@@ -7,6 +7,7 @@ import { FuelSavingsPanel } from '@/components/FuelSavingsPanel';
 import { GloveboxModal } from '@/components/GloveboxModal';
 import { LanguageSelector } from '@/components/LanguageSelector';
 import { useLanguage } from '@/components/LanguageProvider';
+import { useUi } from '@/components/useUi';
 import { RouteMap, DEFAULT_ROUTE, buildRoadSignHud } from '@/components/RouteMap';
 import { useTelemetry } from '@/components/TelemetryProvider';
 import {
@@ -21,6 +22,7 @@ import {
 import { formatDriveTime } from '@/lib/calculations';
 import { useActiveCmr, type CmrShipment } from '@/lib/cmr-store';
 import { driverText, localeToDriverLang } from '@/lib/driver-i18n';
+import { cockpitText } from '@/lib/cockpit-i18n';
 import { buildFuelSavingsPlan } from '@/lib/fuel-savings';
 import { trafficDelayMinutes } from '@/lib/gps';
 import {
@@ -86,6 +88,8 @@ export function DriverCockpit({
   const { locale } = useLanguage();
   const lang = localeToDriverLang(locale);
   const t = useMemo(() => driverText(lang), [lang]);
+  const c = useMemo(() => cockpitText(lang), [lang]);
+  const ui = useUi();
   const nextTurn = nextTurnProp || t.nextTurnDefault;
   const {
     setSimulatedSpeedKmh,
@@ -163,8 +167,9 @@ export function DriverCockpit({
         destination,
         fuelPct,
         rangeKm: 405,
+        lang,
       }),
-    [destination, fuelPct]
+    [destination, fuelPct, lang]
   );
 
   const closeGlovebox = useCallback(() => setShowGlovebox(false), []);
@@ -559,16 +564,16 @@ export function DriverCockpit({
           destination={destination}
           onNavigate={startNavTo}
           onChatOffice={() =>
-            setOfficePing('Bericht naar zaak/planner verzonden — ze zien je tankplan & ETA.')
+            setOfficePing(c.officePing)
           }
         />
 
         <ActiveCmrBanner onOpen={() => setShowCmrImport(true)} />
         {isStandstill && (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            <ParkTile icon="✍️" label="e-CMR tekenen" onClick={openEcmrFlow} />
+            <ParkTile icon="✍️" label={c.eCmrSignShort} onClick={openEcmrFlow} />
             <ParkTile icon="🔍" label="Pre-trip" onClick={() => onOpenPreTrip?.()} />
-            <ParkTile icon="📄" label="Glovebox" onClick={openGlovebox} />
+            <ParkTile icon="📄" label={t.glovebox} onClick={openGlovebox} />
           </div>
         )}
         {isStandstill && parkedChildren}
@@ -622,15 +627,19 @@ export function DriverCockpit({
           >
             {overlay === 'status' && (
               <>
-                <h3 className="fr-display text-lg">Voertuigstatus</h3>
+                <h3 className="fr-display text-lg">{ui('vehicle_cargo')}</h3>
                 <ul className="text-sm text-[#9aa8bc] space-y-2">
-                  <li className="fr-mono">Snelheid: {Math.round(displaySpeedKmh)} km/h</li>
+                  <li className="fr-mono">{Math.round(displaySpeedKmh)} km/h</li>
                   <li className="fr-mono">
                     GPS: {gps.lat.toFixed(4)}, {gps.lng.toFixed(4)}
                   </li>
-                  <li>Brandstof: {fuelPct.toFixed(0)}%</li>
+                  <li>
+                    {t.fuel}: {fuelPct.toFixed(0)}%
+                  </li>
                   <li>ETA: {liveEtaLabel}</li>
-                  <li>Bestemming: {destination}</li>
+                  <li>
+                    {ui('destination')}: {destination}
+                  </li>
                 </ul>
               </>
             )}
@@ -773,53 +782,59 @@ function EcmrPreviewModal({
   onLoadCmr: () => void;
   onSign: () => void;
 }) {
+  const ui = useUi();
+  const { locale } = useLanguage();
+  const c = cockpitText(localeToDriverLang(locale));
+  const t = driverText(localeToDriverLang(locale));
   return (
     <div className="fixed inset-0 z-[70] bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
       <div className="w-full max-w-lg fr-glass p-5 space-y-4 max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between gap-3">
           <div>
             <p className="fr-label">e-CMR</p>
-            <h3 className="fr-display text-lg">Controleer vóór handtekening</h3>
+            <h3 className="fr-display text-lg">{c.ecmrCheckTitle}</h3>
           </div>
           <button type="button" onClick={onClose} className="text-sm text-[#9aa8bc]">
-            Sluiten
+            {t.close}
           </button>
         </div>
 
         {cmr ? (
           <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs rounded-[12px] border border-[#1e2a3a] bg-[#050a0f] p-3">
             <div>
-              <dt className="fr-label">CMR-nr</dt>
+              <dt className="fr-label">{c.cmrNumber}</dt>
               <dd className="fr-mono text-[#00a3ff] font-bold">{cmr.cmrNumber}</dd>
             </div>
             <div>
-              <dt className="fr-label">Gewicht</dt>
+              <dt className="fr-label">{c.weight}</dt>
               <dd className="fr-mono text-[#f2f6fb]">
-                {cmr.grossWeightKg.toLocaleString('nl-NL')} kg · {cmr.loadedWeightT} t
+                {cmr.grossWeightKg.toLocaleString()} kg · {cmr.loadedWeightT} t
               </dd>
             </div>
             <div className="sm:col-span-2">
-              <dt className="fr-label">Afzender</dt>
+              <dt className="fr-label">{ui('cmr_shipper')}</dt>
               <dd className="text-[#e8eef7] font-semibold">{cmr.shipper}</dd>
             </div>
             <div className="sm:col-span-2">
-              <dt className="fr-label">Ontvanger</dt>
+              <dt className="fr-label">{ui('cmr_consignee')}</dt>
               <dd className="text-[#e8eef7] font-semibold">{cmr.consignee}</dd>
             </div>
             <div>
-              <dt className="fr-label">Van</dt>
+              <dt className="fr-label">{ui('origin')}</dt>
               <dd className="text-[#e8eef7]">{cmr.origin}</dd>
             </div>
             <div>
-              <dt className="fr-label">Naar</dt>
+              <dt className="fr-label">{ui('destination')}</dt>
               <dd className="text-[#e8eef7]">{cmr.destination}</dd>
             </div>
             <div className="sm:col-span-2">
-              <dt className="fr-label">Goederen</dt>
+              <dt className="fr-label">{ui('cmr_goods')}</dt>
               <dd className="text-[#e8eef7]">{cmr.goodsDescription}</dd>
             </div>
             <div>
-              <dt className="fr-label">Trekker / oplegger</dt>
+              <dt className="fr-label">
+                {ui('cmr_truck')} / {ui('cmr_trailer')}
+              </dt>
               <dd className="fr-mono text-[#e8eef7]">
                 {cmr.truckPlate} / {cmr.trailerPlate}
               </dd>
@@ -827,22 +842,24 @@ function EcmrPreviewModal({
             {cmr.adr && (
               <div>
                 <dt className="fr-label">ADR</dt>
-                <dd className="text-[#ff8a82] font-bold">Klasse {cmr.adrClass || '•'}</dd>
+                <dd className="text-[#ff8a82] font-bold">
+                  {c.adrClass} {cmr.adrClass || '•'}
+                </dd>
               </div>
             )}
           </dl>
         ) : (
           <div className="rounded-[12px] border border-[#ff9500]/40 bg-[#ff9500]/10 p-4 space-y-2">
-            <p className="text-sm font-bold text-[#ffb84d]">Geen CMR geladen</p>
+            <p className="text-sm font-bold text-[#ffb84d]">{c.noCmrLoaded}</p>
             <p className="text-xs text-[#ffd9a8]">
-              Laad eerst een vrachtbrief (JPG/PNG/PDF). Bestemming nu: {destination}.
+              {ui('cmr_formats')} · {ui('destination')}: {destination}
             </p>
             <button
               type="button"
               onClick={onLoadCmr}
               className="w-full h-11 rounded-[10px] font-bold bg-[#00a3ff] text-white"
             >
-              📋 CMR laden
+              {ui('load_cmr')}
             </button>
           </div>
         )}
@@ -853,7 +870,7 @@ function EcmrPreviewModal({
           onClick={onSign}
           className="w-full h-12 rounded-[12px] font-bold bg-[#28a745] text-white disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          ✓ Akkoord — digitale handtekening
+          ✓ {c.signCmr}
         </button>
       </div>
     </div>

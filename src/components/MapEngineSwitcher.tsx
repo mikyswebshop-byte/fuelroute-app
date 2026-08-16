@@ -1,5 +1,8 @@
 'use client';
 
+import { useUi } from '@/components/useUi';
+import type { UiKey } from '@/lib/ui-i18n';
+
 export type MapEngineId =
   | 'here'
   | 'ptv'
@@ -7,43 +10,45 @@ export type MapEngineId =
   | 'trimble'
   | 'mapbox';
 
-export const MAP_ENGINES: {
+const ENGINES: {
   id: MapEngineId;
   label: string;
   short: string;
-  note: string;
+  noteKey: UiKey;
 }[] = [
   {
     id: 'here',
     label: 'HERE Truck Maps API',
     short: 'HERE Truck',
-    note: 'Brughoogtes, aslasten, ADR/hazmat-tunnels',
+    noteKey: 'map_note_here',
   },
   {
     id: 'ptv',
     label: 'PTV Logistics / xServer',
     short: 'PTV xServer',
-    note: 'Europese Maut & EETS-tolmatrix',
+    noteKey: 'map_note_ptv',
   },
   {
     id: 'tomtom',
     label: 'TomTom Orbis / Truck API',
     short: 'TomTom Orbis',
-    note: 'Live vrachtverkeer & grensvertragingen',
+    noteKey: 'map_note_tomtom',
   },
   {
     id: 'trimble',
     label: 'Trimble / ALK CoPilot Transport',
     short: 'Trimble CoPilot',
-    note: 'Turn-by-turn trucknavigatie',
+    noteKey: 'map_note_trimble',
   },
   {
     id: 'mapbox',
     label: 'Mapbox / OpenStreetMap (Truck Layers)',
     short: 'Mapbox / OSM',
-    note: 'Standaard vectorlaag (backup)',
+    noteKey: 'map_note_mapbox',
   },
 ];
+
+export const MAP_ENGINES = ENGINES;
 
 export function MapEngineSwitcher({
   value,
@@ -54,7 +59,8 @@ export function MapEngineSwitcher({
   onChange: (id: MapEngineId) => void;
   className?: string;
 }) {
-  const active = MAP_ENGINES.find((e) => e.id === value) ?? MAP_ENGINES[0];
+  const ui = useUi();
+  const active = ENGINES.find((e) => e.id === value) ?? ENGINES[0];
 
   return (
     <div
@@ -63,16 +69,16 @@ export function MapEngineSwitcher({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-            Kaartmotor
+            {ui('map_engine')}
           </p>
-          <p className="text-xs text-slate-400 mt-0.5">{active.note}</p>
+          <p className="text-xs text-slate-400 mt-0.5">{ui(active.noteKey)}</p>
         </div>
         <select
           value={value}
           onChange={(e) => onChange(e.target.value as MapEngineId)}
           className="bg-slate-800/80 border border-slate-700/60 rounded-lg px-3 py-2 text-xs font-medium text-slate-200 min-w-[220px]"
         >
-          {MAP_ENGINES.map((engine) => (
+          {ENGINES.map((engine) => (
             <option key={engine.id} value={engine.id}>
               {engine.label}
             </option>
@@ -80,7 +86,7 @@ export function MapEngineSwitcher({
         </select>
       </div>
       <div className="flex flex-wrap gap-1.5">
-        {MAP_ENGINES.map((engine) => {
+        {ENGINES.map((engine) => {
           const on = engine.id === value;
           return (
             <button

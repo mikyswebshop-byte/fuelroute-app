@@ -28,6 +28,7 @@ import {
 import { FuelGauge } from '@/components/charts';
 import { formatDriveTime } from '@/lib/calculations';
 import { DRIVER_LANGS, driverText, localeToDriverLang, type DriverLang } from '@/lib/driver-i18n';
+import { cockpitText } from '@/lib/cockpit-i18n';
 import {
   altFuelStations,
   communityDriverTips,
@@ -111,6 +112,7 @@ export default function DriverPage() {
 
   const lang = langOverride ?? localeToDriver(locale);
   const t = driverText(lang);
+  const cockpit = cockpitText(lang);
 
   const altStops = useMemo(() => recommendedFuelStops.slice(0, 4), []);
   const [selectedStopId, setSelectedStopId] = useState(altStops[0]?.stationName ?? '');
@@ -369,7 +371,8 @@ export default function DriverPage() {
               <div className="fr-glass p-4 text-sm text-[var(--fr-text-muted)]">
                 <p className="fr-display text-base mb-1">{t.telemetrieDetail}</p>
                 <p className="fr-mono text-xs">
-                  RPM {telemetry.engineRpm} · Ping {pingMs} ms · Kaart {activeCard}
+                  RPM {telemetry.engineRpm} · Ping {pingMs} ms · {cockpit.fuelCard}{' '}
+                  {activeCard}
                 </p>
                 <p className="text-xs text-[#6b7a90] mt-1">
                   {gpsTrackingEnabled ? t.gpsOnline : t.gpsOff} ·{' '}
@@ -414,13 +417,13 @@ export default function DriverPage() {
             contextLines={(() => {
               const cmr = getActiveCmr();
               if (!cmr) {
-                return ['Geen CMR geladen — handtekening zonder vrachtgegevens.'];
+                return [cockpit.noCmrLoaded];
               }
               return [
                 `${cmr.cmrNumber} · ${cmr.origin} → ${cmr.destination}`,
                 `${cmr.shipper} → ${cmr.consignee}`,
-                `${cmr.goodsDescription} · ${cmr.grossWeightKg.toLocaleString('nl-NL')} kg`,
-                `Kenteken ${cmr.truckPlate} / ${cmr.trailerPlate}`,
+                `${cockpit.weight}: ${cmr.goodsDescription} · ${cmr.grossWeightKg.toLocaleString()} kg`,
+                `${cmr.truckPlate} / ${cmr.trailerPlate}`,
               ];
             })()}
             onClose={() => setShowSignature(false)}

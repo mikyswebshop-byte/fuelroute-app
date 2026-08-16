@@ -3,6 +3,8 @@
  * Diesel in NL is vrijwel altijd duurder dan in DE/BE/CZ — daar zit de winst.
  */
 
+import type { DriverLang } from '@/lib/driver-i18n';
+import { cockpitText, fillTpl, type CockpitCopy } from '@/lib/cockpit-i18n';
 import {
   parkingSecurity,
   recommendedFuelStops,
@@ -97,6 +99,7 @@ export function buildFuelSavingsPlan(input: {
   rangeKm: number;
   maxDetourKm?: number;
   tankCapacityL?: number;
+  lang?: DriverLang | string;
 }): {
   nlBorderAlert: {
     title: string;
@@ -109,6 +112,7 @@ export function buildFuelSavingsPlan(input: {
   strategyLines: string[];
   headlineSavingEur: number;
 } {
+  const c: CockpitCopy = cockpitText(input.lang ?? 'NL');
   const maxDetourKm = input.maxDetourKm ?? MAX_DETOUR_KM_DEFAULT;
   const dest = input.destination.toLowerCase();
   const towardCz = /czech|tsjech|praag|prague|brno|plzen|ostrava/i.test(dest);
@@ -132,21 +136,20 @@ export function buildFuelSavingsPlan(input: {
 
       let avoidReason: string | undefined;
       if (country === 'NL' && savingVsNlEurPerL < 0.04) {
-        avoidReason = 'Nederland: diesel meestal duurder — liever net over de grens in DE/BE';
+        avoidReason = c.avoidNl;
       }
 
-      let recommendReason = `€${savingVsNlEurPerL.toFixed(3)}/L goedkoper dan NL-referentie`;
+      let recommendReason = fillTpl(c.cheaperThanNl, { p: savingVsNlEurPerL.toFixed(3) });
       if (isNlBorderApproachStop(stop) && country !== 'NL') {
-        recommendReason = `DE-grenspomp vóór NL · ${recommendReason}`;
+        recommendReason = fillTpl(c.deBorderPump, { r: recommendReason });
       }
       if (country === 'CZ') {
-        recommendReason = `Tsjechië vaak nog goedkoper · tank genoeg in DE om hier te komen`;
+        recommendReason = c.czCheaper;
       }
       if (stop.waitStatus === 'storing') {
-        recommendReason += ' · ⚠ pomp storing gemeld';
+        recommendReason += c.pumpFaultNote;
       }
 
-      // Score: besparing, lage omrijtijd, geen wachtrij, douches
       let score = savingVsNlTotalEur;
       score -= detourKm * 1.2;
       score -= stop.detourMinutes * 0.8;
@@ -195,8 +198,13 @@ export function buildFuelSavingsPlan(input: {
   const nlBorderAlert =
     crossesNl && borderDe
       ? {
-          title: 'Tank vóór de Nederlandse grens',
-          body: `Diesel in NL is bijna altijd duurder. Tank nu bij ${borderDe.stationName} (€${borderDe.netPricePerL.toFixed(3)}/L). Advies ±${litersAdvice} L — genoeg om naar de zaak te rijden en weer goedkoop in het buitenland te tanken${towardCz ? ', en door te rijden naar goedkopere diesel in Tsjechië' : ''}.`,
+          title: c.tankBeforeNlTitle,
+          body: fillTpl(c.tankBeforeNlBody, {
+            station: borderDe.stationName,
+            price: borderDe.netPricePerL.toFixed(3),
+            liters: litersAdvice,
+            cz: towardCz ? c.tankBeforeNlCz : '',
+          }),
           litersAdvice,
           station: {
             ...borderDe,
@@ -214,36 +222,41 @@ export function buildFuelSavingsPlan(input: {
   const strategyLines: string[] = [];
   if (nlBorderAlert) {
     strategyLines.push(
-      `1. DE-grens: ${nlBorderAlert.station.stationName} · ±${nlBorderAlert.litersAdvice} L · bespaar ~€${nlBorderAlert.savingEur.toFixed(0)} t.o.v. NL`
+      fillTpl(c.strategyBorder, {
+        station: nlBorderAlert.station.stationName,
+        liters: nlBorderAlert.litersAdvice,
+        save: nlBorderAlert.savingEur.toFixed(0),
+      })
     );
   }
   if (towardCz) {
     const cz = ranked.find((s) => s.country === 'CZ');
     const deFill = ranked.find((s) => s.country === 'DE' && !isNlBorderApproachStop(s));
-    strategyLines.push(
-      `2. Nog op Duitse diesel NL passeren — niet voltanken in NL (Venlo e.d.)`
-    );
+    strategyLines.push(c.strategySkipNl);
     if (deFill) {
-      strategyLines.push(
-        `3. Opnieuw tanken in DE (${deFill.stationName}) met genoeg liters tot goedkope CZ-pomp`
-      );
+      strategyLines.push(fillTpl(c.strategyRefillDe, { station: deFill.stationName }));
     }
     strategyLines.push(
       cz
-        ? `4. Tsjechië: ${cz.stationName} · €${cz.netPricePerL.toFixed(3)}/L`
-        : `4. In CZ tanken zodra je een truck-toegankelijke goedkope pomp op route hebt`
+        ? fillTpl(c.strategyCz, {
+            station: cz.stationName,
+            price: cz.netPricePerL.toFixed(3),
+          })
+        : c.strategyCzAlt
     );
   } else {
     const best = ranked.find((s) => s.country !== 'NL');
     if (best) {
       strategyLines.push(
-        `Beste deal nu: ${best.stationName} · €${best.netPricePerL.toFixed(3)}/L · omrijden ${best.detourKm} km`
+        fillTpl(c.strategyBest, {
+          station: best.stationName,
+          price: best.netPricePerL.toFixed(3),
+          km: best.detourKm,
+        })
       );
     }
   }
-  strategyLines.push(
-    `Omrijden max ${maxDetourKm} km · let op wachttijd, schone douches/WC · check community-tips`
-  );
+  strategyLines.push(fillTpl(c.strategyFooter, { km: maxDetourKm }));
 
   const headlineSavingEur = nlBorderAlert?.savingEur ?? ranked[0]?.savingVsNlTotalEur ?? 0;
 

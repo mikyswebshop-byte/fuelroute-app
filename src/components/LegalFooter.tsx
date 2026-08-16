@@ -1,5 +1,6 @@
 'use client';
 
+import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import { RoleGate } from '@/components/RoleGate';
 
@@ -31,7 +32,11 @@ const DISCLAIMERS = [
 ] as const;
 
 export function LegalFooter() {
+  const pathname = usePathname();
   const [activeTip, setActiveTip] = useState<string | null>(null);
+
+  // Chauffeur-cockpit: geen leeg zwart disclaimer-vlak onder de rit
+  if (pathname.startsWith('/driver')) return null;
 
   return (
     <RoleGate componentId="legal_disclaimers">

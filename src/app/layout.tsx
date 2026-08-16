@@ -4,6 +4,7 @@ import { AppModeProvider } from '@/components/AppModeProvider';
 import { BackToTop } from '@/components/BackToTop';
 import { LanguageProvider } from '@/components/LanguageProvider';
 import { LegalFooter } from '@/components/LegalFooter';
+import { MainShell } from '@/components/MainShell';
 import { Navigation } from '@/components/Navigation';
 import { QuickActionDrawer } from '@/components/QuickActionDrawer';
 import { RoleProvider } from '@/components/RoleProvider';
@@ -43,9 +44,7 @@ export default function RootLayout({
             <LanguageProvider>
               <RoleProvider>
                 <Navigation />
-                <div className="relative z-10 flex-1 py-6 pb-24 md:pb-6 pointer-events-auto">
-                  {children}
-                </div>
+                <MainShell>{children}</MainShell>
                 <LegalFooter />
                 <QuickActionDrawer />
                 <BackToTop />

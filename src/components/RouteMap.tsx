@@ -37,19 +37,18 @@ export type RoadSignHud = {
 
 export function buildRoadSignHud(
   profile: TruckProfile,
-  alerts: TruckAlert[],
+  _alerts: TruckAlert[],
   trafficJam: boolean
 ): RoadSignHud {
-  const hasBorder = alerts.some((a) => a.kind === 'border');
-  const hasToll = alerts.some((a) => a.kind === 'toll');
   return {
     heightM: profile.heightM,
     bridgeTonnageT: Math.min(profile.grossWeightT, 40),
     inclinePct: trafficJam ? 0 : 3,
     noOvertake: profile.grossWeightT >= 7.5,
     speedLimitKmh: profile.grossWeightT > 12 ? 80 : 90,
-    toll: hasToll,
-    border: hasBorder,
+    // Tol/grens horen in de waarschuwingenlijst — niet als grijze vakjes op de kaart
+    toll: false,
+    border: false,
   };
 }
 
@@ -100,7 +99,9 @@ export function RouteMap({
   const truckMarkerRef = useRef<Marker | null>(null);
   const routeLineRef = useRef<Polyline | null>(null);
   const [zoom, setZoom] = useState(8);
+  const [headingUp, setHeadingUp] = useState(false);
   const userZoomRef = useRef(false);
+  const bearingRef = useRef(0);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -186,7 +187,10 @@ export function RouteMap({
   useEffect(() => {
     const map = mapRef.current;
     truckMarkerRef.current?.setLatLng([lat, lng]);
-    if (!map || !navigating) return;
+    if (!map || !navigating) {
+      applyMapRotation(map, 0);
+      return;
+    }
     const targetZoom = speedKmh > 50 ? 13 : speedKmh > 20 ? 14 : 15;
     if (!userZoomRef.current) {
       map.setView([lat, lng], targetZoom, { animate: true });
@@ -194,11 +198,23 @@ export function RouteMap({
     } else {
       map.panTo([lat, lng], { animate: true });
     }
-  }, [lat, lng, navigating, speedKmh]);
+
+    if (headingUp && route.length >= 2) {
+      const next = nearestForwardPoint(route, lat, lng);
+      const brng = bearingDegrees([lat, lng], next);
+      bearingRef.current = brng;
+      applyMapRotation(map, -brng);
+    } else {
+      applyMapRotation(map, 0);
+    }
+  }, [lat, lng, navigating, speedKmh, headingUp, route]);
 
   useEffect(() => {
     if (navigating) {
       userZoomRef.current = false;
+    } else {
+      setHeadingUp(false);
+      applyMapRotation(mapRef.current, 0);
     }
   }, [navigating]);
 
@@ -299,16 +315,6 @@ export function RouteMap({
               title={labels?.noOvertake ?? 'Inhaalverbod'}
             />
           ) : null}
-          {signs.toll ? (
-            <RoadSign kind="toll" value={labels?.toll ?? 'Maut'} title={labels?.toll ?? 'Maut'} />
-          ) : null}
-          {signs.border ? (
-            <RoadSign
-              kind="border"
-              value={labels?.border ?? 'Grens'}
-              title={labels?.border ?? 'Grens'}
-            />
-          ) : null}
           {trafficJam ? (
             <RoadSign kind="jam" value={labels?.file ?? 'FILE'} title={labels?.file ?? 'FILE'} />
           ) : null}
@@ -325,11 +331,11 @@ export function RouteMap({
             {labels?.stop ?? 'Stop'}
           </button>
         ) : null}
-        <div className="flex flex-col items-center rounded-full bg-white/25 backdrop-blur-md border border-white/40 shadow-md py-1 px-0.5">
+        <div className="flex flex-col items-center rounded-full bg-white/30 backdrop-blur-md border border-white/50 shadow-md py-1 px-0.5">
           <button
             type="button"
             onClick={() => setZoomLevel(zoom + 1)}
-            className="w-10 h-10 text-xl font-black text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] touch-manipulation"
+            className="w-10 h-10 text-xl font-black text-[#0b0e11] touch-manipulation"
             aria-label="Inzoomen"
           >
             +
@@ -341,13 +347,13 @@ export function RouteMap({
             step={1}
             value={zoom}
             onChange={(e) => setZoomLevel(Number(e.target.value))}
-            className="h-24 w-8 accent-white [writing-mode:vertical-lr] direction-rtl touch-manipulation opacity-90"
+            className="h-20 w-7 accent-[#0b0e11] [writing-mode:vertical-lr] direction-rtl touch-manipulation"
             aria-label="Zoom"
           />
           <button
             type="button"
             onClick={() => setZoomLevel(zoom - 1)}
-            className="w-10 h-10 text-xl font-black text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] touch-manipulation"
+            className="w-10 h-10 text-xl font-black text-[#0b0e11] touch-manipulation"
             aria-label="Uitzoomen"
           >
             −
@@ -355,8 +361,24 @@ export function RouteMap({
         </div>
         <button
           type="button"
+          onClick={() => {
+            userZoomRef.current = false;
+            setHeadingUp((v) => !v);
+          }}
+          className={`w-10 h-10 rounded-full backdrop-blur-md border text-[10px] font-black touch-manipulation ${
+            headingUp
+              ? 'bg-[#00a3ff]/55 border-white/60 text-white'
+              : 'bg-white/35 border-white/50 text-[#0b0e11]'
+          }`}
+          aria-label={headingUp ? 'Rijrichting omhoog' : 'Noorden omhoog'}
+          title={headingUp ? 'Rijrichting ↑' : 'Noorden ↑'}
+        >
+          {headingUp ? '↑' : 'N'}
+        </button>
+        <button
+          type="button"
           onClick={fitRoute}
-          className="w-10 h-10 rounded-full bg-white/25 backdrop-blur-md border border-white/40 text-white text-xs font-bold drop-shadow touch-manipulation"
+          className="w-10 h-10 rounded-full bg-white/35 backdrop-blur-md border border-white/50 text-[#0b0e11] text-xs font-bold touch-manipulation"
           aria-label={labels?.wholeRoute ?? 'Hele route'}
           title={labels?.wholeRoute ?? 'Hele route'}
         >
@@ -365,28 +387,48 @@ export function RouteMap({
         <button
           type="button"
           onClick={centerTruck}
-          className="w-10 h-10 rounded-full bg-[#00a3ff]/35 backdrop-blur-md border border-white/50 text-white text-sm font-bold touch-manipulation"
+          className="w-10 h-10 rounded-full bg-[#00a3ff]/45 backdrop-blur-md border border-white/50 text-white text-sm font-bold touch-manipulation"
           aria-label={labels?.myPosition ?? 'Mijn positie'}
           title={labels?.myPosition ?? 'Mijn positie'}
         >
           ◎
         </button>
       </div>
-
-      {/* Mini-instructie onderaan kaart (geen zwarte overlay-balk) */}
-      {navigating && guidance ? (
-        <div className="absolute bottom-3 right-14 left-[7.5rem] z-[500] pointer-events-none">
-          <p className="text-[13px] font-bold text-white leading-snug drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)] line-clamp-2">
-            {guidance}
-          </p>
-          <p className="text-[10px] font-semibold text-white/90 drop-shadow-[0_1px_2px_rgba(0,0,0,0.85)] mt-0.5 truncate">
-            {etaLabel ? `ETA ${etaLabel}` : ''}
-            {destinationLabel ? ` · ${destinationLabel}` : ''}
-          </p>
-        </div>
-      ) : null}
     </div>
   );
+}
+
+function bearingDegrees(from: [number, number], to: [number, number]) {
+  const toRad = Math.PI / 180;
+  const φ1 = from[0] * toRad;
+  const φ2 = to[0] * toRad;
+  const Δλ = (to[1] - from[1]) * toRad;
+  const y = Math.sin(Δλ) * Math.cos(φ2);
+  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+}
+
+function nearestForwardPoint(route: [number, number][], lat: number, lng: number): [number, number] {
+  let bestIdx = 0;
+  let bestD = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < route.length; i++) {
+    const d = (route[i][0] - lat) ** 2 + (route[i][1] - lng) ** 2;
+    if (d < bestD) {
+      bestD = d;
+      bestIdx = i;
+    }
+  }
+  return route[Math.min(bestIdx + 1, route.length - 1)] ?? route[route.length - 1];
+}
+
+function applyMapRotation(map: LeafletMap | null, deg: number) {
+  if (!map) return;
+  const pane = map.getPane('mapPane') ?? map.getContainer();
+  if (!pane) return;
+  const el = pane as HTMLElement;
+  el.style.transformOrigin = 'center center';
+  el.style.transition = 'transform 0.35s ease-out';
+  el.style.transform = deg ? `rotate(${deg}deg)` : '';
 }
 
 function RoadSign({

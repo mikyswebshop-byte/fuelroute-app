@@ -202,7 +202,9 @@ export function DriverCockpit({
 
   const startNavTo = useCallback(
     (label: string) => {
-      const resolved = resolveInAppRoute(label, { lat: gps.lat, lng: gps.lng }, truckProfile);
+      const originLabel = activeCmr?.origin;
+      const fromLive = gps.source === 'live' ? { lat: gps.lat, lng: gps.lng } : undefined;
+      const resolved = resolveInAppRoute(label, fromLive, truckProfile, originLabel);
       setDestination(label);
       setActiveNav(resolved);
       setNavStep(0);
@@ -218,14 +220,16 @@ export function DriverCockpit({
       const crit = resolved.truckAlerts.filter((a) => a.severity === 'critical').length;
       setNavFlash(
         crit > 0
-          ? `${t.navStarted} → ${resolved.label} · ${crit} ${t.criticalWarnings}`
-          : `${t.navStarted} → ${resolved.label}`
+          ? `${t.navStarted} → ${originLabel ? `${originLabel} → ` : ''}${resolved.label} · ${crit} ${t.criticalWarnings}`
+          : `${t.navStarted} → ${originLabel ? `${originLabel} → ` : ''}${resolved.label}`
       );
       window.setTimeout(() => setNavFlash(null), 5000);
       speakText(`${t.navStarted}. ${guide}.`, speechLang);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     },
     [
+      activeCmr?.origin,
+      gps.source,
       gps.lat,
       gps.lng,
       truckProfile,
@@ -350,10 +354,31 @@ export function DriverCockpit({
     [truckProfile, activeNav?.truckAlerts, trafficJam]
   );
 
+  const previewRoute = useMemo(() => {
+    if (activeNav?.route) return activeNav.route;
+    if (activeCmr) {
+      return resolveInAppRoute(
+        activeCmr.destination || destination,
+        undefined,
+        truckProfile,
+        activeCmr.origin
+      ).route;
+    }
+    return DEFAULT_ROUTE;
+  }, [activeNav?.route, activeCmr, destination, truckProfile]);
+
+  const mapLat =
+    gps.source === 'live'
+      ? gps.lat
+      : (activeNav?.route[0]?.[0] ?? previewRoute[0]?.[0] ?? gps.lat);
+  const mapLng =
+    gps.source === 'live'
+      ? gps.lng
+      : (activeNav?.route[0]?.[1] ?? previewRoute[0]?.[1] ?? gps.lng);
+
   return (
-    <main className="min-h-[calc(100vh-4rem)] bg-[var(--fr-bg)] text-[var(--fr-text)] pb-28">
-      {/* Compacte statusstrook + taal */}
-      <div className={`${bannerClass} px-3 py-1.5 flex items-center justify-between gap-2`}>
+    <main className="bg-[var(--fr-bg)] text-[var(--fr-text)] pb-[4.5rem]">
+      <div className={`${bannerClass} px-3 py-1 flex items-center justify-between gap-2`}>
         <p className="text-[11px] font-bold truncate flex-1">
           {trafficJam
             ? t.file
@@ -405,16 +430,16 @@ export function DriverCockpit({
       )}
 
       <RouteMap
-        lat={gps.lat}
-        lng={gps.lng}
+        lat={mapLat}
+        lng={mapLng}
         trafficJam={trafficJam}
-        route={activeNav?.route ?? DEFAULT_ROUTE}
+        route={previewRoute}
         navigating={navActive}
         guidance={liveGuidance}
         speedKmh={displaySpeedKmh}
         etaLabel={liveEtaLabel}
         destinationLabel={routeLabel}
-        signs={roadSigns}
+        signs={navActive ? roadSigns : null}
         onStopNav={stopNav}
         labels={{
           stop: t.stopNav,
@@ -428,14 +453,10 @@ export function DriverCockpit({
           wholeRoute: t.wholeRoute,
           myPosition: t.myPosition,
         }}
-        heightClass={
-          navActive
-            ? 'h-[min(62vh,520px)] min-h-[300px]'
-            : 'h-[min(48vh,420px)] min-h-[260px]'
-        }
+        heightClass="h-[min(46vh,420px)] min-h-[240px]"
       />
 
-      <div className="px-3 py-2 border-b border-[#1e2a3a] bg-[#0b0e11]/95 space-y-2">
+      <div className="sticky top-0 z-30 px-3 py-2 border-b border-[#1e2a3a] bg-[#0b0e11] space-y-2 shadow-lg">
         <div className="flex gap-2 items-center">
           <input
             type="text"
@@ -464,7 +485,7 @@ export function DriverCockpit({
         </div>
         <div className="grid grid-cols-4 gap-1.5">
           <QuickBtn
-            label={isDriving ? t.stop : t.drive}
+            label={isDriving ? t.standstill : t.drive}
             onClick={isDriving ? stopSimulation : startSimulation}
             accent={isDriving}
           />
@@ -483,48 +504,38 @@ export function DriverCockpit({
           />
         </div>
         <p className="text-[10px] text-[#6b7a90] truncate">
-          {truckProfile.truckPlate} / {truckProfile.trailerPlate} · {truckProfile.heightM.toFixed(1)} m ·{' '}
-          {truckProfile.grossWeightT} t · {formatDriveTime(Math.round(etaMinutes))} · {t.fuelShort}{' '}
+          {routeLabel} · {truckProfile.truckPlate} / {truckProfile.trailerPlate} ·{' '}
+          {truckProfile.heightM.toFixed(1)} m · {truckProfile.grossWeightT} t · {t.fuelShort}{' '}
           {fuelPct.toFixed(0)}%
         </p>
       </div>
 
       <div className="max-w-3xl mx-auto px-3 py-3 space-y-3">
-        {!navActive && (
-          <>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              <MetricChip label={t.driveTime} value={formatDriveTime(Math.round(etaMinutes))} />
-              <MetricChip label={t.nextStop} value={`${nextStopKm.toFixed(0)} km`} />
-              <MetricChip label={t.fuelShort} value={`${fuelPct.toFixed(0)}%`} warn={fuelLow} />
-              <MetricChip
-                label={t.duty}
-                value={trafficJam ? t.file : isStandstill ? t.standstill : t.driving}
-                ok={!trafficJam && !isStandstill}
-              />
-            </div>
-            <details className="fr-glass p-3">
-              <summary className="fr-label cursor-pointer">{t.vehicleCombo}</summary>
-              <div className="mt-3">
-                <TruckProfilePanel profile={truckProfile} onChange={setTruckProfile} />
-              </div>
-            </details>
-            <FuelSavingsPanel
-              destination={destination}
-              onNavigate={startNavTo}
-              onChatOffice={() =>
-                setOfficePing('Bericht naar zaak/planner verzonden — ze zien je tankplan & ETA.')
-              }
-            />
-          </>
-        )}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <MetricChip label={t.driveTime} value={formatDriveTime(Math.round(etaMinutes))} />
+          <MetricChip label={t.nextStop} value={`${nextStopKm.toFixed(0)} km`} />
+          <MetricChip label={t.fuelShort} value={`${fuelPct.toFixed(0)}%`} warn={fuelLow} />
+          <MetricChip
+            label={t.duty}
+            value={trafficJam ? t.file : isStandstill ? t.standstill : t.driving}
+            ok={!trafficJam && !isStandstill}
+          />
+        </div>
+
+        <details className="fr-glass p-3" open={!navActive}>
+          <summary className="fr-label cursor-pointer">{t.vehicleCombo}</summary>
+          <div className="mt-3">
+            <TruckProfilePanel profile={truckProfile} onChange={setTruckProfile} />
+          </div>
+        </details>
 
         {navActive && activeNav && (
-          <details className="fr-glass p-3">
+          <details className="fr-glass p-3" open>
             <summary className="fr-label cursor-pointer">
               {t.truckAlerts} ({activeNav.truckAlerts.filter((a) => a.severity !== 'info').length}{' '}
-              {t.attention})
+              {t.attention}) — maut & grens hier
             </summary>
-            <ul className="mt-2 space-y-2 max-h-48 overflow-y-auto">
+            <ul className="mt-2 space-y-2 max-h-56 overflow-y-auto">
               {activeNav.truckAlerts.map((a) => (
                 <li
                   key={`${a.kind}-${a.title}`}
@@ -544,15 +555,19 @@ export function DriverCockpit({
           </details>
         )}
 
+        <FuelSavingsPanel
+          destination={destination}
+          onNavigate={startNavTo}
+          onChatOffice={() =>
+            setOfficePing('Bericht naar zaak/planner verzonden — ze zien je tankplan & ETA.')
+          }
+        />
+
         <ActiveCmrBanner onOpen={() => setShowCmrImport(true)} />
         {isStandstill && (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             <ParkTile icon="✍️" label="e-CMR tekenen" onClick={openEcmrFlow} />
-            <ParkTile
-              icon="🔍"
-              label="Pre-trip"
-              onClick={() => onOpenPreTrip?.()}
-            />
+            <ParkTile icon="🔍" label="Pre-trip" onClick={() => onOpenPreTrip?.()} />
             <ParkTile icon="📄" label="Glovebox" onClick={openGlovebox} />
           </div>
         )}

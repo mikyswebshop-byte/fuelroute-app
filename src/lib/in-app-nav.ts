@@ -74,6 +74,63 @@ type CorridorMeta = {
   cityAvoid: string;
 };
 
+const CITY_COORDS: { match: RegExp; lat: number; lng: number; label: string }[] = [
+  { match: /amsterdam/i, lat: 52.3676, lng: 4.9041, label: 'Amsterdam' },
+  { match: /rotterdam/i, lat: 51.9244, lng: 4.4777, label: 'Rotterdam' },
+  { match: /utrecht/i, lat: 52.0907, lng: 5.1214, label: 'Utrecht' },
+  { match: /eindhoven/i, lat: 51.4416, lng: 5.4697, label: 'Eindhoven' },
+  { match: /kassel/i, lat: 51.3127, lng: 9.4797, label: 'Kassel' },
+  { match: /duisburg/i, lat: 51.4344, lng: 6.7623, label: 'Duisburg' },
+  { match: /münchen|munchen|munich/i, lat: 48.1351, lng: 11.582, label: 'München' },
+  { match: /praag|prague|praha/i, lat: 50.0755, lng: 14.4378, label: 'Praag' },
+];
+
+export function resolveCityCoord(text?: string): { lat: number; lng: number; label: string } | null {
+  if (!text?.trim()) return null;
+  const hit = CITY_COORDS.find((c) => c.match.test(text));
+  return hit ? { lat: hit.lat, lng: hit.lng, label: hit.label } : null;
+}
+
+/** Amsterdam (NL) → Praag via A2/A3/D5 — CMR-corridor, niet Kassel-demo. */
+const AMSTERDAM_PRAGUE: CorridorMeta = {
+  match: /praag|prague|praha/i,
+  id: 'amsterdam-prague',
+  label: 'Praag (CZ)',
+  route: [
+    [52.3676, 4.9041], // Amsterdam
+    [52.0907, 5.1214], // Utrecht
+    [51.9851, 5.8987], // Arnhem
+    [51.4969, 6.8493], // Oberhausen
+    [50.9375, 6.9603], // Köln
+    [50.1109, 8.6821], // Frankfurt
+    [49.7913, 9.9534], // Würzburg
+    [49.4521, 11.0767], // Nürnberg
+    [49.0134, 12.1016], // Regensburg
+    [49.747, 12.409], // Rozvadov
+    [49.7475, 13.3776], // Plzeň
+    [50.0755, 14.4378], // Praag
+  ],
+  steps: [
+    { instruction: 'Volg A2 oost richting Utrecht / Arnhem', highway: 'A2' },
+    { instruction: 'Grens NL/DE — verder A3 richting Oberhausen / Köln', highway: 'A3' },
+    { instruction: 'Blijf op A3 via Frankfurt / Würzburg', highway: 'A3' },
+    { instruction: 'A3 → D5/E50 richting Plzeň / Praha', highway: 'A3 / D5' },
+    { instruction: 'Grens DE/CZ Rozvadov — tol & documenten', highway: 'D5' },
+    { instruction: 'D5 naar Praag — truckrouting, vermijd centrum', highway: 'D5' },
+  ],
+  etaHintMin: 520,
+  minClearanceM: 4.5,
+  maxWeightT: 40,
+  maxWidthM: 2.6,
+  maxLengthM: 18.75,
+  hasAdrTunnelBan: false,
+  hasEcoZone: true,
+  crossesBorder: true,
+  tollZones: ['DE LKW-Maut', 'CZ EETS/vignette'],
+  weekendBanRisk: true,
+  cityAvoid: 'Praag centrum (lage viaducten & milieuzone)',
+};
+
 const CORRIDORS: CorridorMeta[] = [
   {
     match: /praag|prague|praha|tsjech|czech/i,
@@ -509,19 +566,42 @@ export function buildTruckAlerts(profile: TruckProfile, corridor: CorridorMeta):
 export function resolveInAppRoute(
   destination: string,
   from?: { lat: number; lng: number },
-  profile: TruckProfile = DEFAULT_TRUCK_PROFILE
+  profile: TruckProfile = DEFAULT_TRUCK_PROFILE,
+  originLabel?: string
 ): InAppRoute {
-  const corridor = CORRIDORS.find((c) => c.match.test(destination)) ?? {
-    ...FALLBACK,
-    label: destination.trim() || FALLBACK.label,
-  };
-  const route = [...corridor.route] as LatLng[];
-  if (from && Number.isFinite(from.lat) && Number.isFinite(from.lng)) {
-    route[0] = [from.lat, from.lng];
+  const dest = destination.trim();
+  const origin = (originLabel ?? '').trim();
+  const towardCz = /praag|prague|praha|tsjech|czech/i.test(dest);
+  const fromNl =
+    /amsterdam|rotterdam|utrecht|eindhoven|nederland|\bnl\b/i.test(origin) ||
+    Boolean(resolveCityCoord(origin)?.label.match(/Amsterdam|Rotterdam|Utrecht|Eindhoven/));
+
+  let corridor: CorridorMeta;
+  if (towardCz && fromNl) {
+    corridor = { ...AMSTERDAM_PRAGUE, label: dest || AMSTERDAM_PRAGUE.label };
+  } else {
+    corridor = CORRIDORS.find((c) => c.match.test(dest)) ?? {
+      ...FALLBACK,
+      label: dest || FALLBACK.label,
+    };
   }
+
+  const route = [...corridor.route] as LatLng[];
+  const cityStart = resolveCityCoord(origin);
+  if (cityStart) {
+    route[0] = [cityStart.lat, cityStart.lng];
+  } else if (from && Number.isFinite(from.lat) && Number.isFinite(from.lng)) {
+    // Alleen live GPS als start — niet de Kassel-demo forceren over een CMR-origin
+    const looksLikeKasselDemo =
+      Math.abs(from.lat - 51.312) < 0.05 && Math.abs(from.lng - 9.479) < 0.05;
+    if (!looksLikeKasselDemo || !origin) {
+      route[0] = [from.lat, from.lng];
+    }
+  }
+
   return {
     id: corridor.id,
-    label: destination.trim() || corridor.label,
+    label: dest || corridor.label,
     route,
     steps: corridor.steps,
     etaHintMin: corridor.etaHintMin,

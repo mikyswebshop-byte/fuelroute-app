@@ -1,14 +1,18 @@
 'use client';
 
-import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useAppMode } from '@/components/AppModeProvider';
 import { FuelGauge } from '@/components/charts';
 import { ActiveCmrBanner, CmrImportPanel } from '@/components/CmrImportPanel';
 import { FuelSavingsPanel } from '@/components/FuelSavingsPanel';
 import { GloveboxModal } from '@/components/GloveboxModal';
-import { RouteMap } from '@/components/RouteMap';
+import { RouteMap, DEFAULT_ROUTE } from '@/components/RouteMap';
 import { SpeedGauge } from '@/components/SpeedGauge';
 import { useTelemetry } from '@/components/TelemetryProvider';
+import {
+  TruckProfilePanel,
+  useTruckProfile,
+} from '@/components/TruckProfilePanel';
 import {
   VoiceAssistant,
   speakText,
@@ -18,6 +22,12 @@ import { formatDriveTime } from '@/lib/calculations';
 import { useActiveCmr, type CmrShipment } from '@/lib/cmr-store';
 import { buildFuelSavingsPlan } from '@/lib/fuel-savings';
 import { DEMO_GPS, trafficDelayMinutes } from '@/lib/gps';
+import {
+  guidanceLine,
+  resolveInAppRoute,
+  type InAppRoute,
+} from '@/lib/in-app-nav';
+import { saveTruckProfile } from '@/lib/truck-profile';
 
 function speechLangFromDriver(lang: string) {
   const map: Record<string, string> = {
@@ -46,15 +56,6 @@ function speechLangFromDriver(lang: string) {
 }
 
 type OverlayKind = 'status' | 'tanken' | 'route' | null;
-
-function openMapsNav(query: string) {
-  const q = encodeURIComponent(query);
-  window.open(
-    `https://www.google.com/maps/dir/?api=1&destination=${q}&travelmode=driving`,
-    '_blank',
-    'noopener,noreferrer'
-  );
-}
 
 export function DriverCockpit({
   lang,
@@ -111,12 +112,47 @@ export function DriverCockpit({
   const [destination, setDestination] = useState('Praag / Prague (CZ)');
   const [navFlash, setNavFlash] = useState<string | null>(null);
   const [officePing, setOfficePing] = useState<string | null>(null);
+  const [navActive, setNavActive] = useState(false);
+  const [activeNav, setActiveNav] = useState<InAppRoute | null>(null);
+  const [navStep, setNavStep] = useState(0);
+  const [liveGuidance, setLiveGuidance] = useState(nextTurn);
+  const [truckProfile, setTruckProfile] = useTruckProfile();
   const activeCmr = useActiveCmr();
 
   const isDriving = !isStandstill && (animating || displaySpeedKmh > 10);
   const speechLang = speechLangFromDriver(lang);
   const fuelLow = fuelPct < 20;
   const delayMin = trafficJam ? trafficDelayMinutes(nextStopKm, displaySpeedKmh) : 0;
+
+  useEffect(() => {
+    if (!activeCmr) return;
+    setTruckProfile((prev) => {
+      const next = {
+        ...prev,
+        truckPlate: activeCmr.truckPlate || prev.truckPlate,
+        trailerPlate: activeCmr.trailerPlate || prev.trailerPlate,
+        grossWeightT: activeCmr.loadedWeightT || prev.grossWeightT,
+        adr: activeCmr.adr,
+        adrClass: activeCmr.adrClass || prev.adrClass,
+      };
+      saveTruckProfile(next);
+      return next;
+    });
+  }, [activeCmr, setTruckProfile]);
+
+  useEffect(() => {
+    if (!navActive || !activeNav) return;
+    setLiveGuidance(guidanceLine(activeNav, navStep));
+    const id = window.setInterval(() => {
+      setNavStep((s) => {
+        const next = Math.min(s + 1, activeNav.steps.length - 1);
+        setLiveGuidance(guidanceLine(activeNav, next));
+        return next;
+      });
+    }, 45000);
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navActive, activeNav]);
 
   const fuelPlan = useMemo(
     () =>
@@ -153,11 +189,52 @@ export function DriverCockpit({
     setShowEcmrPreview(true);
   }, []);
 
-  const startNavTo = useCallback((label: string) => {
-    setNavFlash(`Navigatie → ${label}`);
-    window.setTimeout(() => setNavFlash(null), 4000);
-    openMapsNav(label);
+  const stopNav = useCallback(() => {
+    setNavActive(false);
+    setActiveNav(null);
+    setNavStep(0);
+    setNavFlash('Trucknavigatie gestopt');
+    window.setTimeout(() => setNavFlash(null), 2500);
   }, []);
+
+  const startNavTo = useCallback(
+    (label: string) => {
+      const resolved = resolveInAppRoute(label, { lat: gps.lat, lng: gps.lng }, truckProfile);
+      setDestination(label);
+      setActiveNav(resolved);
+      setNavStep(0);
+      setNavActive(true);
+      setDismissGpsPrompt(true);
+      setOverlay(null);
+      setShowGlovebox(false);
+      setStandstill(false);
+      setRouteActive(true);
+      setSimulatedSpeedKmh(72);
+      const guide = guidanceLine(resolved, 0);
+      setLiveGuidance(guide);
+      const crit = resolved.truckAlerts.filter((a) => a.severity === 'critical').length;
+      setNavFlash(
+        crit > 0
+          ? `Trucknav → ${resolved.label} · ${crit} kritieke waarschuwing(en)`
+          : `Trucknav → ${resolved.label} · in FuelRoute`
+      );
+      window.setTimeout(() => setNavFlash(null), 5000);
+      speakText(
+        `Trucknavigatie gestart naar ${resolved.label}. ${guide}. Controleer doorrijhoogte en tonnage.`,
+        speechLang
+      );
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    },
+    [
+      gps.lat,
+      gps.lng,
+      truckProfile,
+      setStandstill,
+      setRouteActive,
+      setSimulatedSpeedKmh,
+      speechLang,
+    ]
+  );
 
   const unreadKey = unreadMessages.join('\u0001');
   const responses = useMemo(() => {
@@ -179,7 +256,9 @@ export function DriverCockpit({
       cmr: 'CMR import geopend. Upload of bekijk vrachtbrief.',
       cmr_foto: 'Bon of CMR foto openen. Kies galerij of camera.',
       nieuwe_route: 'Nieuwe route: vul bestemming in of laad een CMR.',
-      navigatie: `Navigatie: ${nextTurn}. Bestemming ${destination}. ETA ${liveEtaLabel}.`,
+      navigatie: navActive
+        ? `Trucknavigatie actief: ${liveGuidance}. Bestemming ${destination}. Voertuig ${truckProfile.heightM} meter hoog, ${truckProfile.grossWeightT} ton.`
+        : `Nog geen navigatie. Zeg start navigatie of kies bestemming. Nu: ${nextTurn}.`,
       eta: `Geschatte aankomst ${liveEtaLabel}. Resterende rijtijd ${drive}.`,
       rijtijd: `Resterende rijtijd ${drive}. ETA ${liveEtaLabel}.`,
       berichten: msg,
@@ -200,6 +279,10 @@ export function DriverCockpit({
     fuelPlan,
     nextTurn,
     destination,
+    navActive,
+    liveGuidance,
+    truckProfile.heightM,
+    truckProfile.grossWeightT,
   ]);
 
   const onVoiceCommand = useCallback(
@@ -212,7 +295,8 @@ export function DriverCockpit({
           setOverlay('status');
           break;
         case 'navigatie':
-          setOverlay('route');
+          if (!navActive) startNavTo(destination);
+          else setOverlay('route');
           break;
         case 'tanken':
           setOverlay('tanken');
@@ -240,10 +324,11 @@ export function DriverCockpit({
           break;
       }
     },
-    [onOpenBonScan, openGlovebox, startSimulation, stopSimulation]
+    [onOpenBonScan, openGlovebox, startSimulation, stopSimulation, navActive, startNavTo, destination]
   );
 
   const showGpsPrompt =
+    !navActive &&
     !dismissGpsPrompt &&
     (gpsPermission === 'prompt' || gpsPermission === 'denied' || gpsPermission === 'unsupported') &&
     !gpsWatching;
@@ -262,15 +347,22 @@ export function DriverCockpit({
     <main className="min-h-[calc(100vh-4rem)] bg-[var(--fr-bg)] text-[var(--fr-text)] pb-32">
       <div className={`${bannerClass} px-4 py-3 sm:py-4 transition-colors`}>
         <p className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-90">
-          {trafficJam ? 'File / Vertraging' : isDriving ? 'Rij-modus · Handsfree' : 'Stilstand-modus'}
+          {trafficJam
+            ? 'File / Vertraging'
+            : navActive
+              ? 'Trucknavigatie · FuelRoute'
+              : isDriving
+                ? 'Rij-modus · Handsfree'
+                : 'Stilstand-modus'}
         </p>
         <p className="fr-display text-2xl sm:text-3xl md:text-4xl leading-tight mt-1 text-inherit">
-          {trafficJam ? 'FILE / VERTRAGING' : nextTurn}
+          {trafficJam ? 'FILE / VERTRAGING' : navActive ? liveGuidance : nextTurn}
         </p>
         <p className="text-sm mt-1 font-semibold opacity-95">
           ETA {liveEtaLabel}
           {trafficJam && delayMin > 0 ? ` · +${delayMin} min` : ''} · {routeLabel}
           {activeCmr ? ` · ${activeCmr.loadedWeightT} t` : ''}
+          {navActive && activeNav ? ` · ${activeNav.vehicleSummary.split('·')[0]?.trim()}` : ''}
         </p>
       </div>
 
@@ -286,29 +378,25 @@ export function DriverCockpit({
       )}
 
       {showGpsPrompt && (
-        <div className="max-w-3xl mx-auto px-4 pt-4">
-          <div className="fr-glass p-4 space-y-3">
-            <p className="text-sm font-bold text-[#e8eef7]">Locatie delen voor live GPS</p>
-            <p className="text-xs text-[#9aa8bc] leading-relaxed">
-              Sta locatietoegang toe voor tracking, filesignalering en ETA. Bij weigering: democoördinaten (
-              {DEMO_GPS.label}).
+        <div className="max-w-3xl mx-auto px-4 pt-3">
+          <div className="flex flex-wrap items-center gap-2 rounded-[10px] border border-[#1e2a3a] bg-[#0b0e11]/90 px-3 py-2">
+            <p className="text-[11px] text-[#9aa8bc] flex-1 min-w-[12rem] leading-snug">
+              Live GPS optioneel · anders demo ({DEMO_GPS.label})
             </p>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => requestGpsPermission()}
-                className="fr-btn-primary px-4 py-2.5 text-sm"
-              >
-                Locatie toestaan
-              </button>
-              <button
-                type="button"
-                onClick={() => setDismissGpsPrompt(true)}
-                className="px-4 py-2.5 rounded-[10px] text-sm font-semibold bg-[#151d2a] text-[#9aa8bc] border border-[#1e2a3a]"
-              >
-                Later / demo
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => requestGpsPermission()}
+              className="h-9 px-3 rounded-[8px] text-xs font-bold bg-[#00a3ff] text-white"
+            >
+              Locatie
+            </button>
+            <button
+              type="button"
+              onClick={() => setDismissGpsPrompt(true)}
+              className="h-9 px-3 rounded-[8px] text-xs font-semibold text-[#9aa8bc] border border-[#1e2a3a]"
+            >
+              Demo
+            </button>
           </div>
         </div>
       )}
@@ -317,9 +405,23 @@ export function DriverCockpit({
         lat={gps.lat}
         lng={gps.lng}
         trafficJam={trafficJam}
+        route={activeNav?.route ?? DEFAULT_ROUTE}
+        navigating={navActive}
+        guidance={liveGuidance}
+        vehicleSummary={activeNav?.vehicleSummary}
+        truckAlerts={activeNav?.truckAlerts ?? []}
+        onStopNav={stopNav}
         statusLeft={`${gps.source === 'live' ? 'Live GPS' : 'Demo GPS'} · ${Math.round(displaySpeedKmh)} km/h`}
         statusRight={
-          trafficJam ? 'FILE' : isDriving ? (gps.source === 'live' ? 'NAV live' : 'Simulatie') : 'Standby'
+          trafficJam
+            ? 'FILE'
+            : navActive
+              ? 'Trucknav'
+              : isDriving
+                ? gps.source === 'live'
+                  ? 'NAV live'
+                  : 'Simulatie'
+                : 'Standby'
         }
       />
 
@@ -346,10 +448,12 @@ export function DriverCockpit({
         </div>
       </div>
 
-      {/* Route + brandstofbesparing (kern van de app) */}
+      {/* Route + voertuig + brandstofbesparing */}
       <div className="max-w-3xl mx-auto px-4 pb-4 space-y-3">
+        <TruckProfilePanel profile={truckProfile} onChange={setTruckProfile} />
+
         <div className="fr-glass p-4 space-y-3">
-          <p className="fr-label">Bestemming / nieuwe route</p>
+          <p className="fr-label">Bestemming · trucknavigatie in FuelRoute</p>
           <input
             type="text"
             value={destination}
@@ -363,17 +467,54 @@ export function DriverCockpit({
               onClick={() => startNavTo(destination)}
               className="flex-1 min-w-[140px] h-12 rounded-[12px] font-bold bg-[#00a3ff] text-white touch-manipulation"
             >
-              🗺️ Start navigatie
+              Start trucknavigatie
             </button>
-            <button
-              type="button"
-              onClick={() => setShowCmrImport(true)}
-              className="flex-1 min-w-[140px] h-12 rounded-[12px] font-bold border border-[#00a3ff]/40 text-[#7dd3fc] bg-[#00a3ff]/10 touch-manipulation"
-            >
-              📋 Route uit CMR
-            </button>
+            {navActive ? (
+              <button
+                type="button"
+                onClick={stopNav}
+                className="flex-1 min-w-[120px] h-12 rounded-[12px] font-bold bg-[#ff3b30] text-white touch-manipulation"
+              >
+                Stop navigatie
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setShowCmrImport(true)}
+                className="flex-1 min-w-[140px] h-12 rounded-[12px] font-bold border border-[#00a3ff]/40 text-[#7dd3fc] bg-[#00a3ff]/10 touch-manipulation"
+              >
+                Route uit CMR
+              </button>
+            )}
           </div>
+          <p className="text-[10px] text-[#6b7a90] leading-relaxed">
+            Blijft in de app: doorrijhoogte, tonnage, breedte/lengte, aslast, ADR-tunnels, maut,
+            milieuzones, weekendverbod, koeltrailer en speciaal transport — geen Google Maps.
+          </p>
         </div>
+
+        {navActive && activeNav && (
+          <div className="fr-glass p-4 space-y-2">
+            <p className="fr-label">Alle truckwaarschuwingen</p>
+            <ul className="space-y-2 max-h-64 overflow-y-auto">
+              {activeNav.truckAlerts.map((a) => (
+                <li
+                  key={`${a.kind}-${a.title}`}
+                  className={`rounded-[10px] border px-3 py-2 ${
+                    a.severity === 'critical'
+                      ? 'border-[#ff3b30]/45 bg-[#ff3b30]/08'
+                      : a.severity === 'warn'
+                        ? 'border-[#ff9500]/40 bg-[#ff9500]/08'
+                        : 'border-[#1e2a3a] bg-[#050a0f]'
+                  }`}
+                >
+                  <p className="text-xs font-bold text-[#f2f6fb]">{a.title}</p>
+                  <p className="text-[11px] text-[#9aa8bc] mt-0.5 leading-snug">{a.detail}</p>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <FuelSavingsPanel
           destination={destination}
@@ -479,8 +620,8 @@ export function DriverCockpit({
             )}
             {overlay === 'route' && (
               <>
-                <h3 className="fr-display text-lg">Navigatie</h3>
-                <p className="text-sm text-[#9aa8bc]">{nextTurn}</p>
+                <h3 className="fr-display text-lg">Trucknavigatie</h3>
+                <p className="text-sm text-[#9aa8bc]">{navActive ? liveGuidance : nextTurn}</p>
                 <input
                   type="text"
                   value={destination}
@@ -495,7 +636,7 @@ export function DriverCockpit({
                   }}
                   className="w-full h-12 rounded-[12px] font-bold bg-[#00a3ff] text-white"
                 >
-                  Start navigatie
+                  Start trucknavigatie
                 </button>
               </>
             )}
@@ -524,7 +665,7 @@ export function DriverCockpit({
                           setOverlay(null);
                         }}
                       >
-                        Start navigatie →
+                        Start trucknavigatie →
                       </button>
                     </li>
                   ))}
@@ -565,6 +706,18 @@ export function DriverCockpit({
             <CmrImportPanel
               onApplied={(cmr) => {
                 setDestination(cmr.destination);
+                setTruckProfile((prev) => {
+                  const next = {
+                    ...prev,
+                    truckPlate: cmr.truckPlate || prev.truckPlate,
+                    trailerPlate: cmr.trailerPlate || prev.trailerPlate,
+                    grossWeightT: cmr.loadedWeightT || prev.grossWeightT,
+                    adr: cmr.adr,
+                    adrClass: cmr.adrClass || prev.adrClass,
+                  };
+                  saveTruckProfile(next);
+                  return next;
+                });
                 window.setTimeout(() => setShowCmrImport(false), 1200);
               }}
             />

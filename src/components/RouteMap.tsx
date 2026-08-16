@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import type { Map as LeafletMap, Marker, Polyline } from 'leaflet';
+import type { TruckAlert } from '@/lib/in-app-nav';
 
 /** Kassel → München corridor (A7-achtig) with recognizable places. */
 export const DEFAULT_ROUTE: [number, number][] = [
@@ -23,6 +24,12 @@ const LANDMARKS: { name: string; lat: number; lng: number; kind: 'hub' | 'stop' 
   { name: 'München Distribution', lat: 48.1351, lng: 11.582, kind: 'hub' },
 ];
 
+function severityClass(s: TruckAlert['severity']) {
+  if (s === 'critical') return 'border-[#ff3b30]/50 bg-[#2a0a08] text-[#ff8a82]';
+  if (s === 'warn') return 'border-[#ff9500]/45 bg-[#1a1008] text-[#ffd9a8]';
+  return 'border-[#1e2a3a] bg-black/70 text-[#c5d0e0]';
+}
+
 export function RouteMap({
   lat,
   lng,
@@ -32,6 +39,11 @@ export function RouteMap({
   heightClass = 'h-[42vh] min-h-[240px] max-h-[480px]',
   statusLeft,
   statusRight,
+  navigating = false,
+  guidance,
+  vehicleSummary,
+  truckAlerts = [],
+  onStopNav,
 }: {
   lat: number;
   lng: number;
@@ -41,6 +53,11 @@ export function RouteMap({
   heightClass?: string;
   statusLeft?: string;
   statusRight?: string;
+  navigating?: boolean;
+  guidance?: string;
+  vehicleSummary?: string;
+  truckAlerts?: TruckAlert[];
+  onStopNav?: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<LeafletMap | null>(null);
@@ -117,19 +134,32 @@ export function RouteMap({
       truckMarkerRef.current = null;
       routeLineRef.current = null;
     };
-    // Init once — position/route updates handled below
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     truckMarkerRef.current?.setLatLng([lat, lng]);
-  }, [lat, lng]);
+    if (navigating && mapRef.current) {
+      mapRef.current.setView([lat, lng], Math.max(mapRef.current.getZoom(), 10), {
+        animate: true,
+      });
+    }
+  }, [lat, lng, navigating]);
 
   useEffect(() => {
     const line = routeLineRef.current;
-    if (!line) return;
-    line.setStyle({ color: trafficJam ? '#ff9500' : '#00a3ff' });
-  }, [trafficJam]);
+    const map = mapRef.current;
+    if (!line || !map) return;
+    line.setLatLngs(route);
+    line.setStyle({ color: trafficJam ? '#ff9500' : navigating ? '#28a745' : '#00a3ff' });
+    if (navigating || route.length > 2) {
+      try {
+        map.fitBounds(line.getBounds(), { padding: [48, 48], maxZoom: navigating ? 9 : 10 });
+      } catch {
+        /* empty bounds */
+      }
+    }
+  }, [route, trafficJam, navigating]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -162,13 +192,49 @@ export function RouteMap({
     });
   };
 
+  const topAlerts = truckAlerts.filter((a) => a.severity === 'critical').slice(0, 1);
+
   return (
     <div
-      className={`relative w-full overflow-hidden border-b border-[#1e2a3a] ${heightClass} ${className}`}
+      className={`relative w-full overflow-hidden border-b border-[#1e2a3a] ${
+        navigating ? 'h-[52vh] min-h-[280px] max-h-[560px]' : heightClass
+      } ${className}`}
     >
       <div ref={containerRef} className="absolute inset-0 z-0 bg-[#0b0e11]" />
 
+      {navigating && (
+        <div className="absolute top-0 inset-x-0 z-[600] pointer-events-none">
+          <div className="mx-2 mt-2 rounded-[12px] bg-[#0b0e11]/88 border border-[#00a3ff]/35 backdrop-blur px-3 py-2 shadow-lg max-w-[calc(100%-5.5rem)]">
+            <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-[#7dd3fc]">
+              Trucknav · in app
+            </p>
+            <p className="text-sm sm:text-base font-black text-white leading-snug mt-0.5">
+              {guidance}
+            </p>
+            {vehicleSummary ? (
+              <p className="text-[10px] text-[#9aa8bc] mt-1 fr-mono truncate">{vehicleSummary}</p>
+            ) : null}
+          </div>
+          {topAlerts[0] ? (
+            <div
+              className={`mx-2 mt-1.5 rounded-[10px] border px-2.5 py-1.5 backdrop-blur max-w-[calc(100%-5.5rem)] ${severityClass(topAlerts[0].severity)}`}
+            >
+              <p className="text-[11px] font-bold leading-tight">{topAlerts[0].title}</p>
+            </div>
+          ) : null}
+        </div>
+      )}
+
       <div className="absolute top-3 right-3 z-[500] flex flex-col gap-1.5">
+        {navigating && onStopNav ? (
+          <button
+            type="button"
+            onClick={onStopNav}
+            className="h-11 px-3 rounded-[12px] bg-[#ff3b30] text-white text-xs font-bold shadow-lg"
+          >
+            Stop nav
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={() => zoomBy(1)}

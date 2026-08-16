@@ -1223,21 +1223,16 @@ export default function PlannerPage() {
                         <button
                           type="button"
                           onClick={() => {
-                            const q = encodeURIComponent(
-                              `${stop.stationName} ${stop.locationHighway}`
+                            setNavFlash(
+                              `Trucknavigatie → ${stop.stationName} (open chauffeur-cockpit — géén Google Maps)`
                             );
-                            setNavFlash(`Navigatie gestart → ${stop.stationName}`);
                             window.setTimeout(() => setNavFlash(null), 3500);
-                            window.open(
-                              `https://www.google.com/maps/dir/?api=1&destination=${q}&travelmode=driving`,
-                              '_blank',
-                              'noopener,noreferrer'
-                            );
+                            window.location.href = '/driver';
                           }}
                           className="w-full min-h-[2.75rem] px-2.5 py-2 rounded-[10px] text-[11px] font-bold leading-snug whitespace-normal break-words bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white border border-emerald-400/30 touch-manipulation"
                         >
-                          Start navigatie
-                          <span className="block font-semibold opacity-90">naar Autohof</span>
+                          Trucknavigatie
+                          <span className="block font-semibold opacity-90">in FuelRoute</span>
                         </button>
                       </td>
                     </tr>

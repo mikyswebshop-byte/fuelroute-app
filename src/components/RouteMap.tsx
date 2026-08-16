@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
+import type { Map as LeafletMap, Marker, Polyline } from 'leaflet';
 
 /** Kassel → München corridor (A7-achtig) with recognizable places. */
 export const DEFAULT_ROUTE: [number, number][] = [
@@ -24,21 +23,6 @@ const LANDMARKS: { name: string; lat: number; lng: number; kind: 'hub' | 'stop' 
   { name: 'München Distribution', lat: 48.1351, lng: 11.582, kind: 'hub' },
 ];
 
-function pinIcon(color: string, label?: string) {
-  return L.divIcon({
-    className: '',
-    html: `<div style="
-      width:22px;height:22px;border-radius:50%;
-      background:${color};border:3px solid #fff;
-      box-shadow:0 0 12px ${color}aa;
-      display:flex;align-items:center;justify-content:center;
-      font:700 9px/1 Sora,sans-serif;color:#fff;
-    ">${label ?? ''}</div>`,
-    iconSize: [22, 22],
-    iconAnchor: [11, 11],
-  });
-}
-
 export function RouteMap({
   lat,
   lng,
@@ -59,56 +43,76 @@ export function RouteMap({
   statusRight?: string;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<L.Map | null>(null);
-  const truckMarkerRef = useRef<L.Marker | null>(null);
-  const routeLineRef = useRef<L.Polyline | null>(null);
+  const mapRef = useRef<LeafletMap | null>(null);
+  const truckMarkerRef = useRef<Marker | null>(null);
+  const routeLineRef = useRef<Polyline | null>(null);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
+    let cancelled = false;
 
-    const map = L.map(containerRef.current, {
-      zoomControl: false,
-      attributionControl: true,
-      minZoom: 5,
-      maxZoom: 18,
-    }).setView([lat, lng], 8);
+    void (async () => {
+      const L = (await import('leaflet')).default;
+      if (cancelled || !containerRef.current || mapRef.current) return;
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; OpenStreetMap',
-    }).addTo(map);
+      const pinIcon = (color: string, label?: string) =>
+        L.divIcon({
+          className: '',
+          html: `<div style="
+            width:22px;height:22px;border-radius:50%;
+            background:${color};border:3px solid #fff;
+            box-shadow:0 0 12px ${color}aa;
+            display:flex;align-items:center;justify-content:center;
+            font:700 9px/1 Sora,sans-serif;color:#fff;
+          ">${label ?? ''}</div>`,
+          iconSize: [22, 22],
+          iconAnchor: [11, 11],
+        });
 
-    const routeColor = trafficJam ? '#ff9500' : '#00a3ff';
-    const line = L.polyline(route, {
-      color: routeColor,
-      weight: 5,
-      opacity: 0.92,
-      lineJoin: 'round',
-    }).addTo(map);
+      const map = L.map(containerRef.current, {
+        zoomControl: false,
+        attributionControl: true,
+        minZoom: 5,
+        maxZoom: 18,
+      }).setView([lat, lng], 8);
 
-    LANDMARKS.forEach((lm) => {
-      const color =
-        lm.kind === 'hub' ? '#00a3ff' : lm.kind === 'stop' ? '#28a745' : '#9aa8bc';
-      L.marker([lm.lat, lm.lng], { icon: pinIcon(color) })
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap',
+      }).addTo(map);
+
+      const routeColor = trafficJam ? '#ff9500' : '#00a3ff';
+      const line = L.polyline(route, {
+        color: routeColor,
+        weight: 5,
+        opacity: 0.92,
+        lineJoin: 'round',
+      }).addTo(map);
+
+      LANDMARKS.forEach((lm) => {
+        const color =
+          lm.kind === 'hub' ? '#00a3ff' : lm.kind === 'stop' ? '#28a745' : '#9aa8bc';
+        L.marker([lm.lat, lm.lng], { icon: pinIcon(color) })
+          .addTo(map)
+          .bindPopup(`<strong>${lm.name}</strong>`);
+      });
+
+      const truck = L.marker([lat, lng], { icon: pinIcon('#ff3b30', '•') })
         .addTo(map)
-        .bindPopup(`<strong>${lm.name}</strong>`);
-    });
+        .bindPopup('Huidige positie');
 
-    const truck = L.marker([lat, lng], { icon: pinIcon('#ff3b30', '•') })
-      .addTo(map)
-      .bindPopup('Huidige positie');
+      map.fitBounds(line.getBounds(), { padding: [36, 36], maxZoom: 9 });
 
-    map.fitBounds(line.getBounds(), { padding: [36, 36], maxZoom: 9 });
+      mapRef.current = map;
+      truckMarkerRef.current = truck;
+      routeLineRef.current = line;
 
-    mapRef.current = map;
-    truckMarkerRef.current = truck;
-    routeLineRef.current = line;
-
-    // Leaflet needs a tick after layout
-    requestAnimationFrame(() => map.invalidateSize());
+      requestAnimationFrame(() => map.invalidateSize());
+    })();
 
     return () => {
-      map.remove();
+      cancelled = true;
+      mapRef.current?.remove();
       mapRef.current = null;
       truckMarkerRef.current = null;
       routeLineRef.current = null;
@@ -164,7 +168,6 @@ export function RouteMap({
     >
       <div ref={containerRef} className="absolute inset-0 z-0 bg-[#0b0e11]" />
 
-      {/* Zoom + / − */}
       <div className="absolute top-3 right-3 z-[500] flex flex-col gap-1.5">
         <button
           type="button"

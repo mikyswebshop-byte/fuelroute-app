@@ -5,6 +5,8 @@ import { useAppMode } from '@/components/AppModeProvider';
 import { ActiveCmrBanner, CmrImportPanel } from '@/components/CmrImportPanel';
 import { FuelSavingsPanel } from '@/components/FuelSavingsPanel';
 import { GloveboxModal } from '@/components/GloveboxModal';
+import { LanguageSelector } from '@/components/LanguageSelector';
+import { useLanguage } from '@/components/LanguageProvider';
 import { RouteMap, DEFAULT_ROUTE, buildRoadSignHud } from '@/components/RouteMap';
 import { useTelemetry } from '@/components/TelemetryProvider';
 import {
@@ -18,6 +20,7 @@ import {
 } from '@/components/VoiceAssistant';
 import { formatDriveTime } from '@/lib/calculations';
 import { useActiveCmr, type CmrShipment } from '@/lib/cmr-store';
+import { driverText, localeToDriverLang } from '@/lib/driver-i18n';
 import { buildFuelSavingsPlan } from '@/lib/fuel-savings';
 import { trafficDelayMinutes } from '@/lib/gps';
 import {
@@ -56,9 +59,9 @@ function speechLangFromDriver(lang: string) {
 type OverlayKind = 'status' | 'tanken' | 'route' | null;
 
 export function DriverCockpit({
-  lang,
+  lang: _langProp,
   nextStopName,
-  nextTurn,
+  nextTurn: nextTurnProp,
   unreadMessages,
   onEmergency,
   onOpenSignature,
@@ -66,12 +69,12 @@ export function DriverCockpit({
   onOpenPreTrip,
   parkedChildren,
 }: {
-  lang: string;
+  lang?: string;
   remainingDriveMin?: number;
   fuelLevel?: number;
   nextStopKm?: number;
   nextStopName: string;
-  nextTurn: string;
+  nextTurn?: string;
   eta?: string;
   unreadMessages: string[];
   onEmergency: () => void;
@@ -80,6 +83,10 @@ export function DriverCockpit({
   onOpenPreTrip?: () => void;
   parkedChildren?: ReactNode;
 }) {
+  const { locale } = useLanguage();
+  const lang = localeToDriverLang(locale);
+  const t = useMemo(() => driverText(lang), [lang]);
+  const nextTurn = nextTurnProp || t.nextTurnDefault;
   const {
     setSimulatedSpeedKmh,
     isStandstill,
@@ -189,9 +196,9 @@ export function DriverCockpit({
     setNavActive(false);
     setActiveNav(null);
     setNavStep(0);
-    setNavFlash('Trucknavigatie gestopt');
+    setNavFlash(t.navStopped);
     window.setTimeout(() => setNavFlash(null), 2500);
-  }, []);
+  }, [t.navStopped]);
 
   const startNavTo = useCallback(
     (label: string) => {
@@ -211,14 +218,11 @@ export function DriverCockpit({
       const crit = resolved.truckAlerts.filter((a) => a.severity === 'critical').length;
       setNavFlash(
         crit > 0
-          ? `Trucknav → ${resolved.label} · ${crit} kritieke waarschuwing(en)`
-          : `Trucknav → ${resolved.label} · in FuelRoute`
+          ? `${t.navStarted} → ${resolved.label} · ${crit} ${t.criticalWarnings}`
+          : `${t.navStarted} → ${resolved.label}`
       );
       window.setTimeout(() => setNavFlash(null), 5000);
-      speakText(
-        `Trucknavigatie gestart naar ${resolved.label}. ${guide}. Controleer doorrijhoogte en tonnage.`,
-        speechLang
-      );
+      speakText(`${t.navStarted}. ${guide}.`, speechLang);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     },
     [
@@ -229,6 +233,8 @@ export function DriverCockpit({
       setRouteActive,
       setSimulatedSpeedKmh,
       speechLang,
+      t.navStarted,
+      t.criticalWarnings,
     ]
   );
 
@@ -346,21 +352,24 @@ export function DriverCockpit({
 
   return (
     <main className="min-h-[calc(100vh-4rem)] bg-[var(--fr-bg)] text-[var(--fr-text)] pb-28">
-      {/* Compacte statusstrook — geen enorme blauwe banner */}
+      {/* Compacte statusstrook + taal */}
       <div className={`${bannerClass} px-3 py-1.5 flex items-center justify-between gap-2`}>
         <p className="text-[11px] font-bold truncate flex-1">
           {trafficJam
-            ? 'FILE'
+            ? t.file
             : navActive
               ? liveGuidance
               : isDriving
                 ? nextTurn
-                : 'Klaar · kies bestemming'}
+                : t.readyPickDest}
         </p>
-        <p className="text-[10px] font-semibold opacity-95 shrink-0 fr-mono">
-          ETA {liveEtaLabel}
-          {trafficJam && delayMin > 0 ? ` +${delayMin}m` : ''}
-        </p>
+        <div className="flex items-center gap-2 shrink-0">
+          <p className="text-[10px] font-semibold opacity-95 fr-mono">
+            {t.eta} {liveEtaLabel}
+            {trafficJam && delayMin > 0 ? ` +${delayMin}m` : ''}
+          </p>
+          <LanguageSelector compact />
+        </div>
       </div>
 
       {navFlash && (
@@ -382,14 +391,14 @@ export function DriverCockpit({
               onClick={() => requestGpsPermission()}
               className="h-8 px-3 rounded-lg text-[11px] font-bold bg-[#00a3ff] text-white"
             >
-              Live locatie
+              {t.liveLocation}
             </button>
             <button
               type="button"
               onClick={() => setDismissGpsPrompt(true)}
               className="h-8 px-3 rounded-lg text-[11px] font-semibold text-[#9aa8bc]"
             >
-              Overslaan
+              {t.skip}
             </button>
           </div>
         </div>
@@ -407,6 +416,18 @@ export function DriverCockpit({
         destinationLabel={routeLabel}
         signs={roadSigns}
         onStopNav={stopNav}
+        labels={{
+          stop: t.stopNav,
+          height: t.signHeight,
+          weight: t.signWeight,
+          incline: t.signIncline,
+          noOvertake: t.signNoOvertake,
+          toll: t.signToll,
+          border: t.signBorder,
+          file: t.file,
+          wholeRoute: t.wholeRoute,
+          myPosition: t.myPosition,
+        }}
         heightClass={
           navActive
             ? 'h-[min(62vh,520px)] min-h-[300px]'
@@ -414,7 +435,6 @@ export function DriverCockpit({
         }
       />
 
-      {/* Direct onder de kaart: alle belangrijke knoppen */}
       <div className="px-3 py-2 border-b border-[#1e2a3a] bg-[#0b0e11]/95 space-y-2">
         <div className="flex gap-2 items-center">
           <input
@@ -422,7 +442,7 @@ export function DriverCockpit({
             value={destination}
             onChange={(e) => setDestination(e.target.value)}
             className="flex-1 min-w-0 bg-[#050a0f] border border-[#1e2a3a] rounded-[10px] px-3 py-2.5 text-sm text-[#f2f6fb]"
-            placeholder="Bestemming…"
+            placeholder={t.destinationPlaceholder}
           />
           {navActive ? (
             <button
@@ -430,7 +450,7 @@ export function DriverCockpit({
               onClick={stopNav}
               className="h-11 px-4 rounded-[10px] font-bold bg-[#ff3b30] text-white text-sm shrink-0 touch-manipulation"
             >
-              Stop
+              {t.stop}
             </button>
           ) : (
             <button
@@ -438,53 +458,52 @@ export function DriverCockpit({
               onClick={() => startNavTo(destination)}
               className="h-11 px-4 rounded-[10px] font-bold bg-[#00a3ff] text-white text-sm shrink-0 touch-manipulation"
             >
-              Start
+              {t.start}
             </button>
           )}
         </div>
         <div className="grid grid-cols-4 gap-1.5">
           <QuickBtn
-            label={isDriving ? 'Stop' : 'Rijden'}
+            label={isDriving ? t.stop : t.drive}
             onClick={isDriving ? stopSimulation : startSimulation}
             accent={isDriving}
           />
-          <QuickBtn label="Tanken" onClick={() => setOverlay('tanken')} />
-          <QuickBtn label="CMR" onClick={() => setShowCmrImport(true)} />
-          <QuickBtn label="Nood" onClick={onEmergency} danger />
+          <QuickBtn label={t.fuel} onClick={() => setOverlay('tanken')} />
+          <QuickBtn label={t.cmr} onClick={() => setShowCmrImport(true)} />
+          <QuickBtn label={t.emergency} onClick={onEmergency} danger />
         </div>
         <div className="grid grid-cols-4 gap-1.5">
-          <QuickBtn label="Route" onClick={() => setOverlay('route')} />
-          <QuickBtn label="Status" onClick={() => setOverlay('status')} />
-          <QuickBtn label="Glovebox" onClick={openGlovebox} />
+          <QuickBtn label={t.route} onClick={() => setOverlay('route')} />
+          <QuickBtn label={t.status} onClick={() => setOverlay('status')} />
+          <QuickBtn label={t.glovebox} onClick={openGlovebox} />
           <QuickBtn
-            label="Foto"
+            label={t.photo}
             onClick={() => onOpenBonScan?.()}
             disabled={!isStandstill}
           />
         </div>
         <p className="text-[10px] text-[#6b7a90] truncate">
           {truckProfile.truckPlate} / {truckProfile.trailerPlate} · {truckProfile.heightM.toFixed(1)} m ·{' '}
-          {truckProfile.grossWeightT} t · {formatDriveTime(Math.round(etaMinutes))} · brandstof{' '}
+          {truckProfile.grossWeightT} t · {formatDriveTime(Math.round(etaMinutes))} · {t.fuelShort}{' '}
           {fuelPct.toFixed(0)}%
         </p>
       </div>
 
-      {/* Details onder de vouw — niet nodig voor rijden */}
       <div className="max-w-3xl mx-auto px-3 py-3 space-y-3">
         {!navActive && (
           <>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              <MetricChip label="Rijtijd" value={formatDriveTime(Math.round(etaMinutes))} />
-              <MetricChip label="Volgende stop" value={`${nextStopKm.toFixed(0)} km`} />
-              <MetricChip label="Brandstof" value={`${fuelPct.toFixed(0)}%`} warn={fuelLow} />
+              <MetricChip label={t.driveTime} value={formatDriveTime(Math.round(etaMinutes))} />
+              <MetricChip label={t.nextStop} value={`${nextStopKm.toFixed(0)} km`} />
+              <MetricChip label={t.fuelShort} value={`${fuelPct.toFixed(0)}%`} warn={fuelLow} />
               <MetricChip
-                label="Duty"
-                value={trafficJam ? 'File' : isStandstill ? 'Stilstand' : 'Rijden'}
+                label={t.duty}
+                value={trafficJam ? t.file : isStandstill ? t.standstill : t.driving}
                 ok={!trafficJam && !isStandstill}
               />
             </div>
             <details className="fr-glass p-3">
-              <summary className="fr-label cursor-pointer">Voertuigcombinatie (hoogte, tonnage, ADR…)</summary>
+              <summary className="fr-label cursor-pointer">{t.vehicleCombo}</summary>
               <div className="mt-3">
                 <TruckProfilePanel profile={truckProfile} onChange={setTruckProfile} />
               </div>
@@ -502,8 +521,8 @@ export function DriverCockpit({
         {navActive && activeNav && (
           <details className="fr-glass p-3">
             <summary className="fr-label cursor-pointer">
-              Truckwaarschuwingen ({activeNav.truckAlerts.filter((a) => a.severity !== 'info').length}{' '}
-              aandacht)
+              {t.truckAlerts} ({activeNav.truckAlerts.filter((a) => a.severity !== 'info').length}{' '}
+              {t.attention})
             </summary>
             <ul className="mt-2 space-y-2 max-h-48 overflow-y-auto">
               {activeNav.truckAlerts.map((a) => (
@@ -551,7 +570,7 @@ export function DriverCockpit({
                 : 'bg-transparent text-[#c5d0e0] border-white/20'
             }`}
           >
-            {isDriving ? 'Stilstand' : 'Simuleer'}
+            {isDriving ? t.standstill : t.simulate}
           </button>
 
           <VoiceAssistant

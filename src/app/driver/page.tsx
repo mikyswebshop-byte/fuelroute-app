@@ -27,7 +27,7 @@ import {
 } from '@/components/VehicleDamagePicker';
 import { FuelGauge } from '@/components/charts';
 import { formatDriveTime } from '@/lib/calculations';
-import { DRIVER_LANGS, driverText, type DriverLang } from '@/lib/driver-i18n';
+import { DRIVER_LANGS, driverText, localeToDriverLang, type DriverLang } from '@/lib/driver-i18n';
 import {
   altFuelStations,
   communityDriverTips,
@@ -107,17 +107,7 @@ export default function DriverPage() {
   const telemetry = useTelemetry();
   const [langOverride, setLangOverride] = useState<DriverLang | null>(null);
 
-  const localeToDriver = (code: AppLocale): DriverLang => {
-    const map: Partial<Record<AppLocale, DriverLang>> = {
-      NL: 'NL',
-      EN: 'EN',
-      DE: 'DE',
-      PL: 'PL',
-      RO: 'RO',
-      BG: 'BG',
-    };
-    return map[code] ?? 'EN';
-  };
+  const localeToDriver = (code: AppLocale): DriverLang => localeToDriverLang(code);
 
   const lang = langOverride ?? localeToDriver(locale);
   const t = driverText(lang);
@@ -361,14 +351,14 @@ export default function DriverPage() {
         <DriverCockpit
           lang={lang}
           nextStopName={selectedStop?.stationName ?? 'Autohof'}
-          nextTurn="Blijf links · A7 richting München"
+          nextTurn={t.nextTurnDefault}
           unreadMessages={unreadMessages}
           onEmergency={openPechhulp}
           onOpenSignature={openSignature}
           onOpenBonScan={() =>
             setCameraSession({
               guide: 'tankbon',
-              label: 'Bon / CMR foto',
+              label: t.uploadReceipt,
               context: { kind: 'doc', docType: 'tankbon' },
             })
           }
@@ -377,13 +367,13 @@ export default function DriverPage() {
             <div className="space-y-3">
               <TelemetryStatusBar />
               <div className="fr-glass p-4 text-sm text-[var(--fr-text-muted)]">
-                <p className="fr-display text-base mb-1">Gedetailleerde telemetrie</p>
+                <p className="fr-display text-base mb-1">{t.telemetrieDetail}</p>
                 <p className="fr-mono text-xs">
                   RPM {telemetry.engineRpm} · Ping {pingMs} ms · Kaart {activeCard}
                 </p>
                 <p className="text-xs text-[#6b7a90] mt-1">
-                  {gpsTrackingEnabled ? 'GPS online' : 'GPS uit'} ·{' '}
-                  {offlineMode ? 'Offline buffer actief' : 'Online'}
+                  {gpsTrackingEnabled ? t.gpsOnline : t.gpsOff} ·{' '}
+                  {offlineMode ? t.offlineBuffer : t.online}
                 </p>
               </div>
             </div>
@@ -395,25 +385,23 @@ export default function DriverPage() {
             <div className="w-full max-w-lg fr-glass border border-[#ff3b30]/40 p-5 space-y-4 shadow-2xl">
               <div className="flex justify-between items-start gap-3">
                 <div>
-                  <h3 className="fr-display text-lg text-[#ff8a82]">🆘 Pechhulp / Noodgeval</h3>
-                  <p className="text-xs text-[var(--fr-text-muted)] mt-1">
-                    Protocol actief · GPS gedeeld met planner {'&'} pechdienst
-                  </p>
+                  <h3 className="fr-display text-lg text-[#ff8a82]">🆘 {t.pechTitle}</h3>
+                  <p className="text-xs text-[var(--fr-text-muted)] mt-1">{t.pechBody}</p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setShowPechhulp(false)}
                   className="text-[#9aa8bc] hover:text-white text-sm"
                 >
-                  Sluiten
+                  {t.close}
                 </button>
               </div>
               <div className="rounded-[12px] border border-[#1e2a3a] bg-[#050a0f] p-4">
-                <p className="fr-label text-[#00a3ff]">GPS-positie</p>
+                <p className="fr-label text-[#00a3ff]">GPS</p>
                 <p className="fr-mono text-xl font-bold text-[#f2f6fb] mt-1">51.312, 9.479</p>
               </div>
               <ActionButton variant="danger" className="w-full" onClick={() => setShowPechhulp(false)}>
-                Bevestig pechmelding
+                {t.confirmPech}
               </ActionButton>
             </div>
           </div>
@@ -499,8 +487,8 @@ export default function DriverPage() {
               className="bg-slate-900 border border-slate-600 rounded-lg px-2 py-1.5 text-xs font-bold text-[#f8fafc]"
             >
               {DRIVER_LANGS.map((l) => (
-                <option key={l} value={l}>
-                  {l}
+                <option key={l.code} value={l.code}>
+                  {l.label}
                 </option>
               ))}
             </select>

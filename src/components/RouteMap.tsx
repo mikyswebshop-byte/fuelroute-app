@@ -67,6 +67,7 @@ export function RouteMap({
   destinationLabel,
   signs,
   onStopNav,
+  labels,
 }: {
   lat: number;
   lng: number;
@@ -81,6 +82,18 @@ export function RouteMap({
   destinationLabel?: string;
   signs?: RoadSignHud | null;
   onStopNav?: () => void;
+  labels?: {
+    stop?: string;
+    height?: string;
+    weight?: string;
+    incline?: string;
+    noOvertake?: string;
+    toll?: string;
+    border?: string;
+    file?: string;
+    wholeRoute?: string;
+    myPosition?: string;
+  };
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<LeafletMap | null>(null);
@@ -264,17 +277,44 @@ export function RouteMap({
       {/* Verkeersborden / truck info — één oogopslag */}
       {signs && (
         <div className="absolute top-2 left-2 z-[500] flex flex-wrap gap-1.5 max-w-[70%] pointer-events-none">
-          <RoadSign kind="height" value={`${signs.heightM.toFixed(1)} m`} />
-          <RoadSign kind="weight" value={`${signs.bridgeTonnageT} t`} />
-          <RoadSign kind="incline" value={`${signs.inclinePct}%`} />
-          {signs.noOvertake ? <RoadSign kind="noOvertake" value="Inhaalverbod" /> : null}
-          {signs.toll ? <RoadSign kind="toll" value="Maut" /> : null}
-          {signs.border ? <RoadSign kind="border" value="Grens" /> : null}
-          {trafficJam ? <RoadSign kind="jam" value="File" /> : null}
+          <RoadSign
+            kind="height"
+            value={`${signs.heightM.toFixed(1)} m`}
+            title={labels?.height ?? 'Hoogte'}
+          />
+          <RoadSign
+            kind="weight"
+            value={`${signs.bridgeTonnageT} t`}
+            title={labels?.weight ?? 'Tonnage'}
+          />
+          <RoadSign
+            kind="incline"
+            value={`${signs.inclinePct}%`}
+            title={labels?.incline ?? 'Helling'}
+          />
+          {signs.noOvertake ? (
+            <RoadSign
+              kind="noOvertake"
+              value={labels?.noOvertake ?? 'Inhaalverbod'}
+              title={labels?.noOvertake ?? 'Inhaalverbod'}
+            />
+          ) : null}
+          {signs.toll ? (
+            <RoadSign kind="toll" value={labels?.toll ?? 'Maut'} title={labels?.toll ?? 'Maut'} />
+          ) : null}
+          {signs.border ? (
+            <RoadSign
+              kind="border"
+              value={labels?.border ?? 'Grens'}
+              title={labels?.border ?? 'Grens'}
+            />
+          ) : null}
+          {trafficJam ? (
+            <RoadSign kind="jam" value={labels?.file ?? 'FILE'} title={labels?.file ?? 'FILE'} />
+          ) : null}
         </div>
       )}
 
-      {/* Transparante zoom-rail rechts */}
       <div className="absolute top-2 right-1.5 z-[500] flex flex-col items-center gap-1">
         {navigating && onStopNav ? (
           <button
@@ -282,7 +322,7 @@ export function RouteMap({
             onClick={onStopNav}
             className="h-10 px-2.5 rounded-lg text-[10px] font-bold text-white bg-[#ff3b30]/85 backdrop-blur-sm touch-manipulation"
           >
-            Stop
+            {labels?.stop ?? 'Stop'}
           </button>
         ) : null}
         <div className="flex flex-col items-center rounded-full bg-white/25 backdrop-blur-md border border-white/40 shadow-md py-1 px-0.5">
@@ -317,8 +357,8 @@ export function RouteMap({
           type="button"
           onClick={fitRoute}
           className="w-10 h-10 rounded-full bg-white/25 backdrop-blur-md border border-white/40 text-white text-xs font-bold drop-shadow touch-manipulation"
-          aria-label="Hele route"
-          title="Hele route"
+          aria-label={labels?.wholeRoute ?? 'Hele route'}
+          title={labels?.wholeRoute ?? 'Hele route'}
         >
           ⧉
         </button>
@@ -326,8 +366,8 @@ export function RouteMap({
           type="button"
           onClick={centerTruck}
           className="w-10 h-10 rounded-full bg-[#00a3ff]/35 backdrop-blur-md border border-white/50 text-white text-sm font-bold touch-manipulation"
-          aria-label="Centreer"
-          title="Mijn positie"
+          aria-label={labels?.myPosition ?? 'Mijn positie'}
+          title={labels?.myPosition ?? 'Mijn positie'}
         >
           ◎
         </button>
@@ -352,15 +392,17 @@ export function RouteMap({
 function RoadSign({
   kind,
   value,
+  title,
 }: {
   kind: 'height' | 'weight' | 'incline' | 'noOvertake' | 'toll' | 'border' | 'jam';
   value: string;
+  title?: string;
 }) {
   if (kind === 'height') {
     return (
       <div
         className="flex flex-col items-center justify-center min-w-[2.75rem] h-11 px-1 rounded-md bg-white border-2 border-[#0b0e11] shadow"
-        title="Doorrijhoogte voertuig"
+        title={title}
       >
         <span className="text-[8px] font-bold text-[#0b0e11] leading-none">↕</span>
         <span className="fr-mono text-[11px] font-black text-[#0b0e11] leading-none">{value}</span>
@@ -371,7 +413,7 @@ function RoadSign({
     return (
       <div
         className="flex flex-col items-center justify-center min-w-[2.75rem] h-11 px-1 rounded-md bg-white border-2 border-[#0b0e11] shadow"
-        title="Brug / tonnage"
+        title={title}
       >
         <span className="text-[8px] font-bold text-[#0b0e11] leading-none">t</span>
         <span className="fr-mono text-[11px] font-black text-[#0b0e11] leading-none">{value}</span>
@@ -382,7 +424,7 @@ function RoadSign({
     return (
       <div
         className="flex flex-col items-center justify-center min-w-[2.75rem] h-11 px-1 rounded-md bg-white border-2 border-[#0b0e11] shadow"
-        title="Helling"
+        title={title}
       >
         <span className="text-[8px] font-bold text-[#0b0e11] leading-none">↗</span>
         <span className="fr-mono text-[11px] font-black text-[#0b0e11] leading-none">{value}</span>
@@ -393,7 +435,7 @@ function RoadSign({
     return (
       <div
         className="flex items-center justify-center w-11 h-11 rounded-full bg-white border-[3px] border-[#ff3b30] shadow"
-        title="Inhaalverbod trucks"
+        title={title}
       >
         <span className="text-[9px] font-black text-[#ff3b30] leading-none text-center px-0.5">
           🚛🚫
@@ -403,13 +445,19 @@ function RoadSign({
   }
   if (kind === 'jam') {
     return (
-      <div className="h-11 px-2 rounded-md bg-[#ff9500] text-[#1a0f00] text-[10px] font-black flex items-center shadow">
-        FILE
+      <div
+        className="h-11 px-2 rounded-md bg-[#ff9500] text-[#1a0f00] text-[10px] font-black flex items-center shadow"
+        title={title}
+      >
+        {value}
       </div>
     );
   }
   return (
-    <div className="h-11 px-2 rounded-md bg-[#0b0e11]/75 backdrop-blur border border-white/30 text-white text-[10px] font-bold flex items-center shadow">
+    <div
+      className="h-11 px-2 rounded-md bg-[#0b0e11]/75 backdrop-blur border border-white/30 text-white text-[10px] font-bold flex items-center shadow"
+      title={title}
+    >
       {value}
     </div>
   );

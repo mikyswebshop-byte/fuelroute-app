@@ -292,8 +292,8 @@ export default function PlannerPage() {
                 lat={DEMO_GPS.lat}
                 lng={DEMO_GPS.lng}
                 heightClass="h-[36vh] min-h-[220px] max-h-[420px]"
-                statusLeft={`${mapEngine.toUpperCase()} · OSM-preview`}
-                statusRight={`${origin} → ${destination}`}
+                speedKmh={0}
+                destinationLabel={`${origin} → ${destination}`}
               />
             </div>
           </div>

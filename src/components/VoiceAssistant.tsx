@@ -31,7 +31,7 @@ type SpeechRecognitionLike = {
 };
 
 const DEFAULT_HINT =
-  "Zeg: Status, Tanken, Nieuwe route, CMR foto, Bon, Stilstand, Navigatie…";
+  "Zeg gerust slordig: waar tanken, grens, goedkoopste pomp, douche, nieuwe route, bon foto…";
 
 function getRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
   if (typeof window === 'undefined') return null;
@@ -51,70 +51,113 @@ export function speakText(text: string, lang = 'nl-NL') {
   window.speechSynthesis.speak(u);
 }
 
-export function matchVoiceCommand(transcript: string): VoiceCommandId {
-  const t = transcript.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
+function normalizeSpeech(raw: string): string {
+  return raw
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
+/** Levenshtein — tolerante matching voor typo's / onduidelijke spraak. */
+function editDistance(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => new Array<number>(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i]![0] = i;
+  for (let j = 0; j <= n; j++) dp[0]![j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i]![j] = Math.min(
+        dp[i - 1]![j]! + 1,
+        dp[i]![j - 1]! + 1,
+        dp[i - 1]![j - 1]! + cost
+      );
+    }
+  }
+  return dp[m]![n]!;
+}
+
+function fuzzyHas(haystack: string, needle: string, maxDist = 2): boolean {
+  if (!needle) return false;
+  if (haystack.includes(needle)) return true;
+  const words = haystack.split(' ');
+  for (const w of words) {
+    if (Math.abs(w.length - needle.length) > maxDist) continue;
+    if (editDistance(w, needle) <= maxDist) return true;
+  }
+  // multi-word needle: check sliding
+  const parts = needle.split(' ');
+  if (parts.length > 1) {
+    return parts.every((p) => fuzzyHas(haystack, p, Math.max(1, maxDist - 1)));
+  }
+  return false;
+}
+
+function anyFuzzy(haystack: string, needles: string[], maxDist = 2): boolean {
+  return needles.some((n) => fuzzyHas(haystack, n, maxDist));
+}
+
+export function matchVoiceCommand(transcript: string): VoiceCommandId {
+  const t = normalizeSpeech(transcript);
+
+  // Foto / bon / CMR scan (vaak slordig uitgesproken)
   if (
-    t.includes('fotograf') ||
-    t.includes('cmr foto') ||
-    t.includes('fotografeer cmr') ||
-    t.includes('bon foto') ||
-    t.includes('bon scannen') ||
-    t.includes('tankbon') ||
-    t.includes('fotografeer bon') ||
-    (t.includes('bon') && (t.includes('foto') || t.includes('scan') || t.includes('maak')))
+    anyFuzzy(t, ['fotograf', 'fotografeer', 'foto', 'scan', 'scannen'], 2) &&
+    anyFuzzy(t, ['bon', 'tankbon', 'cmr', 'vrachtbrief', 'brief'], 2)
   ) {
     return 'cmr_foto';
   }
+  if (anyFuzzy(t, ['tankbon', 'bonnetje', 'bonnet'], 2)) return 'cmr_foto';
+
+  // Brandstofbesparing / grens — kern van de app
   if (
-    t.includes('nieuwe route') ||
-    t.includes('nieuwe navigatie') ||
-    t.includes('andere route') ||
-    t.includes('route wijzigen') ||
-    t.includes('bestemming') ||
-    t.includes('herplan')
-  ) {
-    return 'nieuwe_route';
-  }
-  if (t.includes('navigatie') || t.includes('navigeer') || t.includes('volgende afslag')) {
-    return 'navigatie';
-  }
-  if (t.includes('eta') || t.includes('aankomst') || t.includes('hoe laat')) return 'eta';
-  if (t.includes('handschoen') || t.includes('document')) return 'handschoenvak';
-  if (t.includes('cmr') || t.includes('handteken') || t.includes('vrachtbrief') || t.includes('signature')) {
-    return 'cmr';
-  }
-  if (
-    t.includes('simuleer') ||
-    t.includes('start rit') ||
-    t.includes('rijden') ||
-    t.includes('start route')
-  ) {
-    return 'simuleer';
-  }
-  if (t.includes('stilstand') || t.includes('pauze') || t.includes('parkeren') || t.includes('stop rit')) {
-    return 'stilstand';
-  }
-  if (
-    t.includes('status') ||
-    t.includes('voertuig') ||
-    t.includes('telemetrie') ||
-    t.includes('telemetry')
-  ) {
-    return 'status';
-  }
-  if (
-    t.includes('tanken') ||
-    t.includes('brandstof') ||
-    t.includes('tankstation') ||
+    anyFuzzy(t, ['grens', 'nederland', 'holland', 'venlo'], 2) ||
+    anyFuzzy(t, ['goedkoop', 'goedkoopste', 'bespaar', 'besparing', 'prijs'], 2) ||
+    anyFuzzy(t, ['tanken', 'tank', 'diesel', 'brandstof', 'pomp', 'tankstop', 'tankstation'], 2) ||
     t.includes('waar tank') ||
-    t.includes('fuel')
+    t.includes('waar kan ik tank') ||
+    anyFuzzy(t, ['douche', 'douches', 'wc', 'toilet', 'wachttijd', 'wachtrij'], 2)
   ) {
     return 'tanken';
   }
-  if (t.includes('rijtijd') || t.includes('hoe lang')) return 'rijtijd';
-  if (t.includes('bericht') || t.includes('message')) return 'berichten';
-  if (t.includes('pech') || t.includes('nood') || t.includes('emergency')) return 'pech';
+
+  if (
+    anyFuzzy(t, ['nieuwe', 'andere'], 1) &&
+    anyFuzzy(t, ['route', 'navigatie', 'rit'], 2)
+  ) {
+    return 'nieuwe_route';
+  }
+  if (anyFuzzy(t, ['bestemming', 'herplan', 'omleiden'], 2)) return 'nieuwe_route';
+
+  if (anyFuzzy(t, ['navigatie', 'navigeer', 'navigeer', 'afslag', 'routebegeleiding'], 2)) {
+    return 'navigatie';
+  }
+  if (anyFuzzy(t, ['eta', 'aankomst'], 1) || t.includes('hoe laat')) return 'eta';
+
+  if (anyFuzzy(t, ['handschoen', 'handschoenvak', 'glovebox', 'documenten'], 2)) {
+    return 'handschoenvak';
+  }
+  if (anyFuzzy(t, ['cmr', 'vrachtbrief', 'handteken', 'handtekening', 'ecmr'], 2)) {
+    return 'cmr';
+  }
+
+  if (anyFuzzy(t, ['simuleer', 'simulatie'], 2) || t.includes('start rit')) return 'simuleer';
+  if (anyFuzzy(t, ['stilstand', 'pauze', 'parkeren'], 2) || t.includes('stop rit')) {
+    return 'stilstand';
+  }
+
+  if (anyFuzzy(t, ['status', 'voertuig', 'telemetrie'], 2)) return 'status';
+  if (anyFuzzy(t, ['rijtijd', 'tachograaf', 'rust'], 2)) return 'rijtijd';
+  if (anyFuzzy(t, ['bericht', 'berichten', 'planner', 'zaak', 'chat'], 2)) return 'berichten';
+  if (anyFuzzy(t, ['pech', 'nood', 'sos', 'hulpdienst'], 1)) return 'pech';
+
+  // Losse “rijden” alleen als geen ander match — start simulatie
+  if (fuzzyHas(t, 'rijden', 1) && !fuzzyHas(t, 'stilstand', 2)) return 'simuleer';
+
   return 'unknown';
 }
 

@@ -386,6 +386,32 @@ export const recommendedFuelStops: FuelStopRow[] = [
     waitStatus: 'geen',
     inTunnelRestriction: true,
   },
+  {
+    stationName: 'OMV Truckstop Rozvadov',
+    locationHighway: 'D5 · Border DE/CZ · Rozvadov',
+    netPricePerL: 1.489,
+    detourMinutes: 4.0,
+    recommendedVolumeL: 480,
+    savingsEur: 38.5,
+    acceptedCards: ['DKV', 'UTA'],
+    adrCompliant: true,
+    clearanceHeightM: 4.4,
+    waitStatus: 'geen',
+    inTunnelRestriction: false,
+  },
+  {
+    stationName: 'EuroOil Praha Západ',
+    locationHighway: 'D5 · Praha · CZ',
+    netPricePerL: 1.452,
+    detourMinutes: 6.0,
+    recommendedVolumeL: 420,
+    savingsEur: 52.0,
+    acceptedCards: ['DKV', 'UTA'],
+    adrCompliant: true,
+    clearanceHeightM: 4.3,
+    waitStatus: 'druk',
+    inTunnelRestriction: false,
+  },
 ];
 
 export const emergencyParkingSpots: EmergencyParkingSpot[] = [

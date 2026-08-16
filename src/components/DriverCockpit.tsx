@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import { useAppMode } from '@/components/AppModeProvider';
 import { FuelGauge } from '@/components/charts';
 import { ActiveCmrBanner, CmrImportPanel } from '@/components/CmrImportPanel';
+import { FuelSavingsPanel } from '@/components/FuelSavingsPanel';
 import { GloveboxModal } from '@/components/GloveboxModal';
 import { RouteMap } from '@/components/RouteMap';
 import { SpeedGauge } from '@/components/SpeedGauge';
@@ -15,8 +16,8 @@ import {
 } from '@/components/VoiceAssistant';
 import { formatDriveTime } from '@/lib/calculations';
 import { useActiveCmr, type CmrShipment } from '@/lib/cmr-store';
+import { buildFuelSavingsPlan } from '@/lib/fuel-savings';
 import { DEMO_GPS, trafficDelayMinutes } from '@/lib/gps';
-import { recommendedFuelStops, type FuelStopRow } from '@/lib/mock-data';
 
 function speechLangFromDriver(lang: string) {
   const map: Record<string, string> = {
@@ -45,16 +46,6 @@ function speechLangFromDriver(lang: string) {
 }
 
 type OverlayKind = 'status' | 'tanken' | 'route' | null;
-
-function isNearNlBorder(stop: FuelStopRow) {
-  return /border|nl\/de|de\/nl|venlo|bentheim|hamminkeln/i.test(
-    `${stop.stationName} ${stop.locationHighway}`
-  );
-}
-
-function isInNetherlands(stop: FuelStopRow) {
-  return /\bNL\b|Venlo/i.test(`${stop.stationName} ${stop.locationHighway}`);
-}
 
 function openMapsNav(query: string) {
   const q = encodeURIComponent(query);
@@ -117,9 +108,9 @@ export function DriverCockpit({
   const [showEcmrPreview, setShowEcmrPreview] = useState(false);
   const [overlay, setOverlay] = useState<OverlayKind>(null);
   const [dismissGpsPrompt, setDismissGpsPrompt] = useState(false);
-  const [dismissBorderWarn, setDismissBorderWarn] = useState(false);
-  const [destination, setDestination] = useState('München Distribution (DE)');
+  const [destination, setDestination] = useState('Praag / Prague (CZ)');
   const [navFlash, setNavFlash] = useState<string | null>(null);
+  const [officePing, setOfficePing] = useState<string | null>(null);
   const activeCmr = useActiveCmr();
 
   const isDriving = !isStandstill && (animating || displaySpeedKmh > 10);
@@ -127,18 +118,15 @@ export function DriverCockpit({
   const fuelLow = fuelPct < 20;
   const delayMin = trafficJam ? trafficDelayMinutes(nextStopKm, displaySpeedKmh) : 0;
 
-  const cheapStops = useMemo(
-    () => [...recommendedFuelStops].sort((a, b) => a.netPricePerL - b.netPricePerL).slice(0, 5),
-    []
+  const fuelPlan = useMemo(
+    () =>
+      buildFuelSavingsPlan({
+        destination,
+        fuelPct,
+        rangeKm: 405,
+      }),
+    [destination, fuelPct]
   );
-  const cheapestDeBeforeNl = useMemo(() => {
-    const borderDe = recommendedFuelStops
-      .filter((s) => isNearNlBorder(s) && !isInNetherlands(s))
-      .sort((a, b) => a.netPricePerL - b.netPricePerL);
-    return borderDe[0] ?? cheapStops[0];
-  }, [cheapStops]);
-
-  const showNlBorderWarn = !dismissBorderWarn && (fuelPct < 35 || fuelLow);
 
   const closeGlovebox = useCallback(() => setShowGlovebox(false), []);
   const openGlovebox = useCallback(() => {
@@ -178,10 +166,13 @@ export function DriverCockpit({
       unreadMessages.length === 0
         ? 'Geen ongelezen berichten van de planner.'
         : `${unreadMessages.length} berichten. ${unreadMessages[0]}`;
-    const cheap = cheapestDeBeforeNl;
+    const cheap = fuelPlan.nlBorderAlert?.station ?? fuelPlan.rankedStops[0];
+    const saveEur = fuelPlan.headlineSavingEur;
     return {
       status: `Voertuigstatus: snelheid ${Math.round(displaySpeedKmh)} kilometer per uur, brandstof ${fuelPct.toFixed(0)} procent, rijtijd ${drive}.${trafficJam ? ' File gedetecteerd.' : ''}`,
-      tanken: `Goedkoopste tip: ${cheap.stationName}, €${cheap.netPricePerL.toFixed(3)} per liter. ${showNlBorderWarn ? 'Tank in Duitsland vóór de Nederlandse grens.' : ''} Volgende stop ${nextStopName}.`,
+      tanken: cheap
+        ? `Tankadvies: ${cheap.stationName}, €${cheap.netPricePerL.toFixed(3)} per liter. Bespaar ongeveer ${saveEur.toFixed(0)} euro versus Nederland. ${fuelPlan.nlBorderAlert ? 'Tank vóór de Nederlandse grens.' : ''}`
+        : `Dichtstbijzijnde tip: ${nextStopName}.`,
       stilstand: 'Stilstand-modus geactiveerd. Tools beschikbaar.',
       simuleer: 'Rit-simulatie gestart. Drive mode actief.',
       handschoenvak: 'Handschoenvak geopend.',
@@ -194,21 +185,19 @@ export function DriverCockpit({
       berichten: msg,
       pech: 'Noodprotocol gestart. Pechhulp wordt geactiveerd.',
       unknown:
-        "Sorry, niet begrepen. Zeg: status, tanken, nieuwe route, CMR foto, bon fotograferen, navigatie, stilstand of handschoenvak.",
+        "Sorry, niet helemaal begrepen. Zeg bijvoorbeeld: waar tanken, goedkoopste pomp, grens waarschuwing, nieuwe route, bon foto, navigatie, douche, of status.",
       listening: 'Luistert...',
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     etaMinutes,
     nextStopName,
-    nextStopKm,
     unreadKey,
     displaySpeedKmh,
     fuelPct,
     trafficJam,
     liveEtaLabel,
-    cheapestDeBeforeNl,
-    showNlBorderWarn,
+    fuelPlan,
     nextTurn,
     destination,
   ]);
@@ -285,45 +274,14 @@ export function DriverCockpit({
         </p>
       </div>
 
-      {showNlBorderWarn && (
-        <div className="mx-4 mt-3 rounded-[14px] border border-[#ff9500]/50 bg-[#1a1008] px-4 py-3 flex gap-3 items-start">
-          <span className="text-xl" aria-hidden>
-            ⛽
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-bold text-[#ff9500]">Grens NL — tank in Duitsland</p>
-            <p className="text-xs text-[#ffd9a8] mt-1 leading-relaxed">
-              Brandstof {fuelPct.toFixed(0)}%. Tank vóór Nederland bij{' '}
-              <span className="font-bold">{cheapestDeBeforeNl.stationName}</span> (€
-              {cheapestDeBeforeNl.netPricePerL.toFixed(3)}/L) — vermijd duurder tanken in NL (bijv.
-              Venlo).
-            </p>
-            <button
-              type="button"
-              className="mt-2 text-xs font-bold text-[#00a3ff]"
-              onClick={() =>
-                startNavTo(
-                  `${cheapestDeBeforeNl.stationName} ${cheapestDeBeforeNl.locationHighway}`
-                )
-              }
-            >
-              Navigeer naar grens-tankstop →
-            </button>
-          </div>
-          <button
-            type="button"
-            className="text-[#ffb84d] text-sm font-bold"
-            onClick={() => setDismissBorderWarn(true)}
-            aria-label="Sluiten"
-          >
-            ✕
-          </button>
-        </div>
-      )}
-
       {navFlash && (
         <div className="mx-4 mt-3 rounded-[10px] border border-[#28a745]/40 bg-[#28a745]/10 px-3 py-2 text-xs font-bold text-[#86efac]">
           {navFlash}
+        </div>
+      )}
+      {officePing && (
+        <div className="mx-4 mt-2 rounded-[10px] border border-[#00a3ff]/35 bg-[#00a3ff]/10 px-3 py-2 text-xs font-semibold text-[#7dd3fc]">
+          {officePing}
         </div>
       )}
 
@@ -388,7 +346,7 @@ export function DriverCockpit({
         </div>
       </div>
 
-      {/* Route + navigatie — altijd beschikbaar */}
+      {/* Route + brandstofbesparing (kern van de app) */}
       <div className="max-w-3xl mx-auto px-4 pb-4 space-y-3">
         <div className="fr-glass p-4 space-y-3">
           <p className="fr-label">Bestemming / nieuwe route</p>
@@ -397,7 +355,7 @@ export function DriverCockpit({
             value={destination}
             onChange={(e) => setDestination(e.target.value)}
             className="w-full bg-[#050a0f] border border-[#1e2a3a] rounded-[10px] px-3 py-2.5 text-sm text-[#f2f6fb]"
-            placeholder="Bestemming…"
+            placeholder="Bijv. Praag, München, Duisburg…"
           />
           <div className="flex flex-wrap gap-2">
             <button
@@ -417,52 +375,13 @@ export function DriverCockpit({
           </div>
         </div>
 
-        <div className="fr-glass p-4 space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <p className="fr-label">Goedkoopste tankstops</p>
-            <button
-              type="button"
-              className="text-[11px] font-bold text-[#00a3ff]"
-              onClick={() => setOverlay('tanken')}
-            >
-              Alles
-            </button>
-          </div>
-          <ul className="space-y-2">
-            {cheapStops.map((stop, i) => (
-              <li
-                key={stop.stationName}
-                className="rounded-[12px] border border-[#1e2a3a] bg-[#050a0f] px-3 py-2.5 flex items-center gap-3"
-              >
-                <span className="fr-mono text-xs text-[#6b7a90] w-4">{i + 1}</span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-bold text-[#f2f6fb] truncate">{stop.stationName}</p>
-                  <p className="text-[11px] text-[#9aa8bc] truncate">{stop.locationHighway}</p>
-                  {isInNetherlands(stop) && (
-                    <p className="text-[10px] font-bold text-[#ff9500] mt-0.5">NL — duurder, liever DE</p>
-                  )}
-                  {isNearNlBorder(stop) && !isInNetherlands(stop) && (
-                    <p className="text-[10px] font-bold text-[#86efac] mt-0.5">
-                      DE bij NL-grens · aanbevolen
-                    </p>
-                  )}
-                </div>
-                <div className="text-right shrink-0">
-                  <p className="fr-mono text-sm font-bold text-[#00a3ff]">
-                    €{stop.netPricePerL.toFixed(3)}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => startNavTo(`${stop.stationName} ${stop.locationHighway}`)}
-                    className="mt-1 text-[10px] font-bold text-[#86efac]"
-                  >
-                    Navigeer
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
+        <FuelSavingsPanel
+          destination={destination}
+          onNavigate={startNavTo}
+          onChatOffice={() =>
+            setOfficePing('Bericht naar zaak/planner verzonden — ze zien je tankplan & ETA.')
+          }
+        />
       </div>
 
       {/* Tools — ook deels tijdens rijden (alleen stilstand voor foto/handtekening) */}
@@ -582,17 +501,20 @@ export function DriverCockpit({
             )}
             {overlay === 'tanken' && (
               <>
-                <h3 className="fr-display text-lg">Tankstations</h3>
+                <h3 className="fr-display text-lg">Tankadvies</h3>
                 <p className="text-xs text-[#ffb84d]">
-                  Tip: tank in DE bij de NL-grens — niet in Venlo (NL) als het kan.
+                  Kernregel: niet voltanken in NL als DE/BE/CZ goedkoper is.
                 </p>
                 <ul className="space-y-2">
-                  {cheapStops.map((stop) => (
+                  {fuelPlan.rankedStops.slice(0, 5).map((stop) => (
                     <li key={stop.stationName} className="rounded-[10px] border border-[#1e2a3a] p-3">
                       <p className="text-sm font-bold text-[#f2f6fb]">{stop.stationName}</p>
-                      <p className="text-[11px] text-[#9aa8bc]">{stop.locationHighway}</p>
+                      <p className="text-[11px] text-[#9aa8bc]">
+                        {stop.country} · {stop.locationHighway}
+                      </p>
                       <p className="fr-mono text-sm text-[#00a3ff] mt-1">
-                        €{stop.netPricePerL.toFixed(3)}/L · bespaar €{stop.savingsEur.toFixed(2)}
+                        €{stop.netPricePerL.toFixed(3)}/L · ±{stop.litersAdvice} L · +€
+                        {Math.max(0, stop.savingVsNlTotalEur).toFixed(0)} vs NL
                       </p>
                       <button
                         type="button"

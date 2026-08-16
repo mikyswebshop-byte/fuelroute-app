@@ -19,6 +19,7 @@ import { useRole } from '@/components/RoleProvider';
 import { SignatureModal } from '@/components/SignatureModal';
 import { TelemetryStatusBar } from '@/components/TelemetryStatusBar';
 import { scrollToId } from '@/lib/access';
+import { getActiveCmr } from '@/lib/cmr-store';
 import {
   VehicleDamagePicker,
   type DamageZone,
@@ -371,6 +372,7 @@ export default function DriverPage() {
               context: { kind: 'doc', docType: 'tankbon' },
             })
           }
+          onOpenPreTrip={() => setShowPreTrip(true)}
           parkedChildren={
             <div className="space-y-3">
               <TelemetryStatusBar />
@@ -421,6 +423,18 @@ export default function DriverPage() {
           <SignatureModal
             title={tUi('ecmr_title')}
             subtitle={tUi('ecmr_subtitle')}
+            contextLines={(() => {
+              const cmr = getActiveCmr();
+              if (!cmr) {
+                return ['Geen CMR geladen — handtekening zonder vrachtgegevens.'];
+              }
+              return [
+                `${cmr.cmrNumber} · ${cmr.origin} → ${cmr.destination}`,
+                `${cmr.shipper} → ${cmr.consignee}`,
+                `${cmr.goodsDescription} · ${cmr.grossWeightKg.toLocaleString('nl-NL')} kg`,
+                `Kenteken ${cmr.truckPlate} / ${cmr.trailerPlate}`,
+              ];
+            })()}
             onClose={() => setShowSignature(false)}
             onSave={(dataUrl, signerName) => {
               setSignatureInfo({ name: signerName, dataUrl });
@@ -436,6 +450,10 @@ export default function DriverPage() {
             onClose={() => setCameraSession(null)}
             onAccepted={onCameraAccepted}
           />
+        )}
+
+        {showPreTrip && (
+          <PreTripWalkaround open={showPreTrip} onClose={() => setShowPreTrip(false)} />
         )}
       </>
     );

@@ -76,11 +76,14 @@ export function SignatureModal({
   subtitle,
   onClose,
   onSave,
+  contextLines,
 }: {
   title: string;
   subtitle: string;
   onClose: () => void;
   onSave: (dataUrl: string, signerName: string) => void;
+  /** Extra lines shown above the pads (CMR summary). */
+  contextLines?: string[];
 }) {
   const [step, setStep] = useState(2); // Gegevens → Lading → Handtekeningen → Overzicht
   const [signerName, setSignerName] = useState('');
@@ -106,6 +109,14 @@ export function SignatureModal({
             Sluiten
           </button>
         </div>
+
+        {contextLines && contextLines.length > 0 && (
+          <ul className="rounded-[12px] border border-[#00a3ff]/30 bg-[#00a3ff]/10 px-3 py-2.5 text-xs text-[#c5e8ff] space-y-1">
+            {contextLines.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        )}
 
         {/* Stepper — kit §05 */}
         <div className="flex gap-1 sm:gap-2">

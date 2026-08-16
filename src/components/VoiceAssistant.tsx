@@ -55,14 +55,7 @@ export function matchVoiceCommand(transcript: string): VoiceCommandId {
   const t = transcript.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
 
   if (
-    t.includes('nieuwe route') ||
-    t.includes('andere route') ||
-    t.includes('route wijzigen') ||
-    t.includes('herplan')
-  ) {
-    return 'nieuwe_route';
-  }
-  if (
+    t.includes('fotograf') ||
     t.includes('cmr foto') ||
     t.includes('fotografeer cmr') ||
     t.includes('bon foto') ||
@@ -72,6 +65,16 @@ export function matchVoiceCommand(transcript: string): VoiceCommandId {
     (t.includes('bon') && (t.includes('foto') || t.includes('scan') || t.includes('maak')))
   ) {
     return 'cmr_foto';
+  }
+  if (
+    t.includes('nieuwe route') ||
+    t.includes('nieuwe navigatie') ||
+    t.includes('andere route') ||
+    t.includes('route wijzigen') ||
+    t.includes('bestemming') ||
+    t.includes('herplan')
+  ) {
+    return 'nieuwe_route';
   }
   if (t.includes('navigatie') || t.includes('navigeer') || t.includes('volgende afslag')) {
     return 'navigatie';

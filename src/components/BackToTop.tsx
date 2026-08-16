@@ -14,7 +14,7 @@ export function BackToTop() {
     return () => window.removeEventListener('scroll', onScroll);
   }, [pathname]);
 
-  if (pathname === '/' || !visible) return null;
+  if (pathname === '/' || pathname.startsWith('/driver') || !visible) return null;
 
   return (
     <button
